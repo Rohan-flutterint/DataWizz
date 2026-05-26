@@ -1,0 +1,9 @@
+customer_id,customer_name,segment,region,signup_date
+C001,Acme Retail,Enterprise,North,2024-08-11
+C002,Blue Peak Stores,Mid Market,West,2024-09-03
+C003,Cornerstone Office,SMB,South,2024-10-14
+C004,Delta Living,Enterprise,East,2024-11-25
+C005,Evercore Systems,Mid Market,West,2025-01-08
+C006,Future Connect,Enterprise,East,2025-02-19
+C007,Grandline Furnishings,SMB,North,2025-03-05
+C008,Horizon Labs,Enterprise,South,2025-04-12

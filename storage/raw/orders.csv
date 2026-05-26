@@ -1,0 +1,13 @@
+order_id,customer_id,status,ship_mode,payment_type
+1001,C001,Completed,Air,Credit Card
+1002,C002,Completed,Ground,Bank Transfer
+1003,C003,Completed,Ground,Credit Card
+1004,C001,Completed,Air,Invoice
+1005,C004,Completed,Freight,Bank Transfer
+1006,C005,Completed,Ground,Credit Card
+1007,C003,Completed,Ground,Invoice
+1008,C006,Completed,Air,Credit Card
+1009,C002,Completed,Ground,Bank Transfer
+1010,C007,Completed,Freight,Credit Card
+1011,C008,Completed,Air,Invoice
+1012,C004,Completed,Ground,Credit Card

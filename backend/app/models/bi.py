@@ -1,0 +1,57 @@
+from sqlalchemy import ForeignKey, JSON, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.session import Base
+from app.models.common import TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class SemanticDataset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "semantic_datasets"
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    schema_json: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    metrics_json: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    dimensions_json: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+
+
+class Chart(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "charts"
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    chart_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    dataset_id: Mapped[str | None] = mapped_column(ForeignKey("semantic_datasets.id", ondelete="SET NULL"), nullable=True)
+    query_sql: Mapped[str] = mapped_column(Text, nullable=False)
+    config_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
+class Dashboard(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "dashboards"
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    layout_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    filters_json: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+
+
+class DashboardWidget(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "dashboard_widgets"
+
+    dashboard_id: Mapped[str] = mapped_column(ForeignKey("dashboards.id", ondelete="CASCADE"), nullable=False)
+    chart_id: Mapped[str | None] = mapped_column(ForeignKey("charts.id", ondelete="SET NULL"), nullable=True)
+    widget_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    layout_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    config_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class ReportSchedule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "report_schedules"
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    dashboard_id: Mapped[str | None] = mapped_column(ForeignKey("dashboards.id", ondelete="SET NULL"), nullable=True)
+    frequency: Mapped[str] = mapped_column(String(32), nullable=False)
+    destination: Mapped[str] = mapped_column(String(64), default="local_export", nullable=False)
+    config_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

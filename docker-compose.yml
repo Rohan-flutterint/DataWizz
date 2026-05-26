@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: lakehouse
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/lakehouse
+      RAW_STORAGE_PATH: /data/raw
+      CURATED_STORAGE_PATH: /data/curated
+      TEMP_STORAGE_PATH: /data/temp
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: lakehouse
+      EXECUTION_ENGINE: duckdb
+    depends_on:
+      - postgres
+      - minio
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage/raw:/data/raw
+      - ./storage/curated:/data/curated
+      - ./storage/temp:/data/temp
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: http://localhost:8000/api
+    ports:
+      - "3000:80"
+
+  superset:
+    image: apache/superset:latest
+    profiles: ["superset"]
+    depends_on:
+      - postgres
+    environment:
+      SUPERSET_SECRET_KEY: internal-lakehouse-demo
+      SUPERSET_ADMIN_USERNAME: admin
+      SUPERSET_ADMIN_PASSWORD: admin
+      SUPERSET_ADMIN_EMAIL: admin@example.com
+      SUPERSET_ADMIN_FIRSTNAME: Internal
+      SUPERSET_ADMIN_LASTNAME: Admin
+    command: >
+      /bin/sh -c "
+      superset db upgrade &&
+      superset fab create-admin
+        --username $$SUPERSET_ADMIN_USERNAME
+        --firstname $$SUPERSET_ADMIN_FIRSTNAME
+        --lastname $$SUPERSET_ADMIN_LASTNAME
+        --email $$SUPERSET_ADMIN_EMAIL
+        --password $$SUPERSET_ADMIN_PASSWORD &&
+      superset init &&
+      superset run -h 0.0.0.0 -p 8088
+      "
+    ports:
+      - "8088:8088"
+
+volumes:
+  postgres_data:
+  minio_data:

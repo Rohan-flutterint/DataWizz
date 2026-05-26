@@ -1,0 +1,13 @@
+order_id,customer_id,order_date,region,product_category,revenue,quantity
+1001,C001,2026-01-05,North,Electronics,12500,3
+1002,C002,2026-01-08,West,Furniture,8200,2
+1003,C003,2026-01-12,South,Office Supplies,1400,12
+1004,C001,2026-02-02,North,Electronics,9800,2
+1005,C004,2026-02-14,East,Furniture,15100,4
+1006,C005,2026-02-18,West,Software,6400,8
+1007,C003,2026-03-01,South,Office Supplies,2100,15
+1008,C006,2026-03-09,East,Electronics,17300,5
+1009,C002,2026-03-18,West,Software,5800,6
+1010,C007,2026-03-27,North,Furniture,9100,3
+1011,C008,2026-04-04,South,Electronics,22000,7
+1012,C004,2026-04-18,East,Office Supplies,1950,20

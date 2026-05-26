@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "internal-lakehouse-platform-backend"
+version = "0.1.0"
+description = "FastAPI backend for the Internal Lakehouse Platform"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "alembic>=1.13.1",
+  "duckdb>=1.0.0",
+  "deltalake>=0.18.0",
+  "fastapi>=0.115.0",
+  "networkx>=3.3",
+  "pandas>=2.2.2",
+  "psycopg[binary]>=3.2.1",
+  "pyarrow>=17.0.0",
+  "pydantic-settings>=2.5.2",
+  "python-multipart>=0.0.9",
+  "sqlalchemy>=2.0.34",
+  "uvicorn[standard]>=0.30.6",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27.0",
+  "pytest>=8.3.2",
+  "pytest-asyncio>=0.24.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
