@@ -83,6 +83,8 @@ export function DatasetsPage() {
   const selectedDataset = selection?.kind === 'dataset' ? datasets.find((dataset) => dataset.id === selection.id) ?? null : null
 
   const selectedSchema = selectedCandidate?.schema_json ?? selectedDataset?.schema_json ?? []
+  const selectedSourceType = selectedCandidate?.source_type ?? selectedDataset?.source_type ?? ''
+  const selectedUpdatedAt = selectedCandidate?.updated_at ?? selectedDataset?.updated_at
 
   useEffect(() => {
     if (selectedCandidate) {
@@ -127,6 +129,18 @@ export function DatasetsPage() {
           ? `Registered semantic dataset ${dataset.name}.`
           : `Registered semantic dataset as ${dataset.name} because that name was already used.`,
       )
+    },
+    onError: (error: Error) => {
+      setStatusMessage(error.message)
+    },
+  })
+  const updateDatasetMutation = useMutation({
+    mutationFn: async (payload: { id: string; body: Record<string, unknown> }) => api.updateDataset(payload.id, payload.body),
+    onSuccess: (dataset) => {
+      queryClient.invalidateQueries({ queryKey: ['bi', 'datasets'] })
+      setSelection({ kind: 'dataset', id: dataset.id })
+      setDatasetName(dataset.name)
+      setStatusMessage(`Updated semantic dataset ${dataset.name}.`)
     },
     onError: (error: Error) => {
       setStatusMessage(error.message)
@@ -258,7 +272,7 @@ export function DatasetsPage() {
                   </div>
                 </div>
 
-                {selectedCandidate ? (
+                {selectedCandidate || selectedDataset ? (
                   <div className="grid gap-4 lg:grid-cols-2">
                     <div>
                       <Label>Dataset Name</Label>
@@ -266,8 +280,8 @@ export function DatasetsPage() {
                     </div>
                     <div>
                       <Label>Source Type</Label>
-                      <Select value={selectedCandidate.source_type} disabled>
-                        <option value={selectedCandidate.source_type}>{selectedCandidate.source_type}</option>
+                      <Select value={selectedSourceType} disabled>
+                        <option value={selectedSourceType}>{selectedSourceType}</option>
                       </Select>
                     </div>
                     <div className="lg:col-span-2">
@@ -283,30 +297,7 @@ export function DatasetsPage() {
                       <Textarea rows={10} value={metricsText} onChange={(event) => setMetricsText(event.target.value)} />
                     </div>
                   </div>
-                ) : (
-                  <div className="grid gap-4 lg:grid-cols-2">
-                    <div className="rounded-2xl bg-slate-50 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Dimensions</p>
-                      <p className="mt-2 font-display text-2xl text-ink">{selectedDataset?.dimensions_json?.length ?? 0}</p>
-                    </div>
-                    <div className="rounded-2xl bg-slate-50 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Metrics</p>
-                      <p className="mt-2 font-display text-2xl text-ink">{selectedDataset?.metrics_json?.length ?? 0}</p>
-                    </div>
-                    <div className="lg:col-span-2">
-                      <Label>Semantic Description</Label>
-                      <Textarea rows={4} value={datasetDescription} disabled />
-                    </div>
-                    <div>
-                      <Label>Dimensions JSON</Label>
-                      <Textarea rows={10} value={dimensionsText} disabled />
-                    </div>
-                    <div>
-                      <Label>Metrics JSON</Label>
-                      <Textarea rows={10} value={metricsText} disabled />
-                    </div>
-                  </div>
-                )}
+                ) : null}
 
                 {selectedCandidate ? (
                   <Button
@@ -325,6 +316,26 @@ export function DatasetsPage() {
                   >
                     {createDatasetMutation.isPending ? 'Registering...' : 'Register Semantic Dataset'}
                   </Button>
+                ) : selectedDataset ? (
+                  <Button
+                    disabled={updateDatasetMutation.isPending}
+                    onClick={() =>
+                      updateDatasetMutation.mutate({
+                        id: selectedDataset.id,
+                        body: {
+                          name: datasetName.trim(),
+                          source_type: selectedDataset.source_type,
+                          source_ref: selectedDataset.source_ref,
+                          description: datasetDescription.trim() || null,
+                          schema_json: selectedDataset.schema_json ?? [],
+                          dimensions_json: parseJsonArray(dimensionsText),
+                          metrics_json: parseJsonArray(metricsText),
+                        },
+                      })
+                    }
+                  >
+                    {updateDatasetMutation.isPending ? 'Saving...' : 'Save Dataset Changes'}
+                  </Button>
                 ) : null}
               </Panel>
 
@@ -342,9 +353,9 @@ export function DatasetsPage() {
                       </div>
                     ))}
                   </div>
-                  {selectedCandidate?.updated_at ? (
+                  {selectedUpdatedAt ? (
                     <p className="mt-4 text-xs uppercase tracking-[0.2em] text-slate/50">
-                      Updated {formatDate(selectedCandidate.updated_at)}
+                      Updated {formatDate(selectedUpdatedAt)}
                     </p>
                   ) : null}
                 </Panel>

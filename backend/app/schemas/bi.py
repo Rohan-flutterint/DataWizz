@@ -29,6 +29,18 @@ class SemanticDatasetCreateRequest(BaseModel):
     model_config = {"protected_namespaces": (), "populate_by_name": True}
 
 
+class SemanticDatasetUpdateRequest(BaseModel):
+    name: str = Field(min_length=1)
+    source_type: str
+    source_ref: str
+    description: str | None = None
+    schema_definition: list[dict] | None = Field(default=None, alias="schema_json", serialization_alias="schema_json")
+    metrics_json: list[dict] | None = None
+    dimensions_json: list[dict] | None = None
+
+    model_config = {"protected_namespaces": (), "populate_by_name": True}
+
+
 class SemanticDatasetRead(TimestampedModel):
     name: str
     source_type: str
@@ -42,6 +54,14 @@ class SemanticDatasetRead(TimestampedModel):
 
 
 class ChartCreateRequest(BaseModel):
+    name: str
+    chart_type: str
+    dataset_id: str | None = None
+    query_sql: str
+    config_json: dict = Field(default_factory=dict)
+
+
+class ChartUpdateRequest(BaseModel):
     name: str
     chart_type: str
     dataset_id: str | None = None
@@ -69,6 +89,14 @@ class DashboardWidgetPayload(BaseModel):
 
 
 class DashboardCreateRequest(BaseModel):
+    name: str
+    description: str | None = None
+    layout_json: dict = Field(default_factory=dict)
+    filters_json: list[dict] | None = None
+    widgets: list[DashboardWidgetPayload] = Field(default_factory=list)
+
+
+class DashboardUpdateRequest(BaseModel):
     name: str
     description: str | None = None
     layout_json: dict = Field(default_factory=dict)

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ChartRenderer } from '../components/chart-renderer'
 import { DataTable } from '../components/data-table'
-import { Button, EmptyState, Input, PageHeader, Panel, Select } from '../components/ui'
+import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
 import { api } from '../lib/api'
 import { formatDate } from '../lib/utils'
 
@@ -16,6 +16,14 @@ export function SavedChartsPage() {
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
   const [statusMessage, setStatusMessage] = useState('Select a saved chart to inspect its SQL, dataset mapping, and live preview.')
+  const [editName, setEditName] = useState('')
+  const [editChartType, setEditChartType] = useState('bar')
+  const [editDatasetId, setEditDatasetId] = useState('')
+  const [editSql, setEditSql] = useState('')
+  const [editDimensionKey, setEditDimensionKey] = useState('')
+  const [editMetricAlias, setEditMetricAlias] = useState('')
+  const [editRowLimit, setEditRowLimit] = useState('')
+  const [editSortDirection, setEditSortDirection] = useState('desc')
 
   const charts = chartsQuery.data?.items ?? []
   const datasetNameById = new Map((datasetsQuery.data?.items ?? []).map((dataset) => [dataset.id, dataset.name]))
@@ -67,6 +75,15 @@ export function SavedChartsPage() {
   useEffect(() => {
     if (!selectedChart) return
     setStatusMessage(`Inspecting saved chart ${selectedChart.name}.`)
+    const config = (selectedChart.config_json ?? {}) as Record<string, unknown>
+    setEditName(selectedChart.name)
+    setEditChartType(selectedChart.chart_type)
+    setEditDatasetId(selectedChart.dataset_id ?? '')
+    setEditSql(selectedChart.query_sql)
+    setEditDimensionKey(String(config.dimensionKey ?? ''))
+    setEditMetricAlias(String(config.metricAlias ?? ''))
+    setEditRowLimit(String(config.rowLimit ?? ''))
+    setEditSortDirection(String(config.sortDirection ?? 'desc'))
   }, [selectedChart])
 
   const deleteMutation = useMutation({
@@ -74,6 +91,17 @@ export function SavedChartsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bi', 'charts'] })
       setStatusMessage('Chart deleted successfully.')
+    },
+    onError: (error: Error) => {
+      setStatusMessage(error.message)
+    },
+  })
+  const updateMutation = useMutation({
+    mutationFn: async (payload: { id: string; body: Record<string, unknown> }) => api.updateChart(payload.id, payload.body),
+    onSuccess: (chart) => {
+      queryClient.invalidateQueries({ queryKey: ['bi', 'charts'] })
+      setSelectedChartId(chart.id)
+      setStatusMessage(`Updated chart ${chart.name}.`)
     },
     onError: (error: Error) => {
       setStatusMessage(error.message)
@@ -168,6 +196,25 @@ export function SavedChartsPage() {
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-lagoon">{selectedChart.chart_type}</span>
+                      <Button disabled={updateMutation.isPending} onClick={() => selectedChart && updateMutation.mutate({
+                        id: selectedChart.id,
+                        body: {
+                          name: editName,
+                          chart_type: editChartType,
+                          dataset_id: editDatasetId || undefined,
+                          query_sql: editSql,
+                          config_json: {
+                            ...selectedConfig,
+                            dimensionKey: editDimensionKey || null,
+                            metricAlias: editMetricAlias || null,
+                            rowLimit: editRowLimit ? Number(editRowLimit) : null,
+                            sortDirection: editSortDirection,
+                            datasetName: editDatasetId ? datasetNameById.get(editDatasetId) : undefined,
+                          },
+                        },
+                      })}>
+                        {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+                      </Button>
                       <Button tone="danger" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(selectedChart.id)}>
                         {deleteMutation.isPending ? 'Deleting...' : 'Delete Chart'}
                       </Button>
@@ -207,7 +254,58 @@ export function SavedChartsPage() {
                     ) : null}
                   </div>
 
-                  <pre className="overflow-x-auto rounded-3xl bg-slate-950 p-4 font-mono text-xs leading-6 text-slate-100">{selectedChart.query_sql}</pre>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <Label>Chart Name</Label>
+                      <Input value={editName} onChange={(event) => setEditName(event.target.value)} />
+                    </div>
+                    <div>
+                      <Label>Chart Type</Label>
+                      <Select value={editChartType} onChange={(event) => setEditChartType(event.target.value)}>
+                        {['bar', 'line', 'area', 'pie', 'donut', 'timeseries', 'kpi'].map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Semantic Dataset</Label>
+                      <Select value={editDatasetId} onChange={(event) => setEditDatasetId(event.target.value)}>
+                        <option value="">Not linked</option>
+                        {datasetsQuery.data?.items?.map((dataset) => (
+                          <option key={dataset.id} value={dataset.id}>
+                            {dataset.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div>
+                        <Label>Dimension Key</Label>
+                        <Input value={editDimensionKey} onChange={(event) => setEditDimensionKey(event.target.value)} />
+                      </div>
+                      <div>
+                        <Label>Metric Alias</Label>
+                        <Input value={editMetricAlias} onChange={(event) => setEditMetricAlias(event.target.value)} />
+                      </div>
+                      <div>
+                        <Label>Row Limit</Label>
+                        <Input type="number" value={editRowLimit} onChange={(event) => setEditRowLimit(event.target.value)} />
+                      </div>
+                    </div>
+                    <div className="md:col-span-2">
+                      <Label>Sort Direction</Label>
+                      <Select value={editSortDirection} onChange={(event) => setEditSortDirection(event.target.value)}>
+                        <option value="desc">desc</option>
+                        <option value="asc">asc</option>
+                      </Select>
+                    </div>
+                    <div className="md:col-span-2">
+                      <Label>Chart SQL</Label>
+                      <Textarea rows={10} value={editSql} onChange={(event) => setEditSql(event.target.value)} />
+                    </div>
+                  </div>
                 </Panel>
 
                 <div className="grid gap-5 xl:grid-cols-[0.95fr_minmax(0,1.05fr)]">

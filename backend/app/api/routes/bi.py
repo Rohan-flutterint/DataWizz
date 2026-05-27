@@ -10,9 +10,11 @@ from app.schemas.bi import (
     ChartCreateRequest,
     ChartRead,
     ChartPreviewResponse,
+    ChartUpdateRequest,
     DashboardListResponse,
     DashboardCreateRequest,
     DashboardDetailResponse,
+    DashboardUpdateRequest,
     DatasetPreviewResponse,
     DatasetExplorerResponse,
     ReportScheduleCreateRequest,
@@ -20,6 +22,7 @@ from app.schemas.bi import (
     ReportScheduleRead,
     SemanticDatasetCreateRequest,
     SemanticDatasetRead,
+    SemanticDatasetUpdateRequest,
 )
 from app.services.bi_service import BiService
 
@@ -41,6 +44,24 @@ def create_dataset(payload: SemanticDatasetCreateRequest, db: Session = Depends(
     data["name"] = bi_service.resolve_dataset_name(db, payload.name)
     record = SemanticDataset(**data)
     db.add(record)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A dataset with this name already exists. Please try again.") from exc
+    db.refresh(record)
+    return record
+
+
+@router.put("/datasets/{dataset_id}", response_model=SemanticDatasetRead)
+def update_dataset(dataset_id: str, payload: SemanticDatasetUpdateRequest, db: Session = Depends(get_db)) -> SemanticDatasetRead:
+    record = db.query(SemanticDataset).filter(SemanticDataset.id == dataset_id).one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    data = payload.model_dump(by_alias=True)
+    data["name"] = bi_service.resolve_dataset_name(db, payload.name, exclude_id=dataset_id)
+    for key, value in data.items():
+        setattr(record, key, value)
     try:
         db.commit()
     except IntegrityError as exc:
@@ -85,6 +106,19 @@ def create_chart(payload: ChartCreateRequest, db: Session = Depends(get_db)) -> 
     return record
 
 
+@router.put("/charts/{chart_id}", response_model=ChartRead)
+def update_chart(chart_id: str, payload: ChartUpdateRequest, db: Session = Depends(get_db)) -> ChartRead:
+    record = db.query(Chart).filter(Chart.id == chart_id).one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Chart not found")
+    data = payload.model_dump()
+    for key, value in data.items():
+        setattr(record, key, value)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
 @router.delete("/charts/{chart_id}", response_model=ApiMessage)
 def delete_chart(chart_id: str, db: Session = Depends(get_db)) -> ApiMessage:
     record = db.query(Chart).filter(Chart.id == chart_id).one_or_none()
@@ -119,6 +153,25 @@ def create_dashboard(payload: DashboardCreateRequest, db: Session = Depends(get_
         filters_json=payload.filters_json,
     )
     db.add(dashboard)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A dashboard with this name already exists. Please try again.") from exc
+    db.refresh(dashboard)
+    widgets = bi_service.replace_dashboard_widgets(db, dashboard, [item.model_dump() for item in payload.widgets])
+    return DashboardDetailResponse(dashboard=dashboard, widgets=widgets)
+
+
+@router.put("/dashboards/{dashboard_id}", response_model=DashboardDetailResponse)
+def update_dashboard(dashboard_id: str, payload: DashboardUpdateRequest, db: Session = Depends(get_db)) -> DashboardDetailResponse:
+    dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).one_or_none()
+    if dashboard is None:
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+    dashboard.name = bi_service.resolve_dashboard_name(db, payload.name, exclude_id=dashboard_id)
+    dashboard.description = payload.description
+    dashboard.layout_json = payload.layout_json
+    dashboard.filters_json = payload.filters_json
     try:
         db.commit()
     except IntegrityError as exc:
