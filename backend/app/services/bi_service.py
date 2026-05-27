@@ -1,11 +1,15 @@
 import json
+import zipfile
 from datetime import datetime, timezone
+from io import BytesIO
+from html import escape
 from pathlib import Path
 
+import pyarrow.csv as pacsv
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models.bi import Chart, Dashboard, DashboardWidget, ReportSchedule, SemanticDataset
+from app.models.bi import Chart, Dashboard, DashboardWidget, ReportSchedule, ReportSnapshot, SemanticDataset
 from app.models.catalog import DeltaTable, UploadedFile
 from app.services.duckdb_service import DuckDBService
 
@@ -71,6 +75,12 @@ class BiService:
             suffix += 1
 
         return candidate
+
+    def list_report_snapshots(self, db: Session, schedule_id: str | None = None) -> list[ReportSnapshot]:
+        query = db.query(ReportSnapshot)
+        if schedule_id is not None:
+            query = query.filter(ReportSnapshot.schedule_id == schedule_id)
+        return query.order_by(ReportSnapshot.created_at.desc()).all()
 
     def preview_delta_source(self, db: Session, *, table_id: str | None = None, table_name: str | None = None, limit: int = 20) -> dict:
         query = db.query(DeltaTable)
@@ -222,6 +232,215 @@ class BiService:
             "artifact_path": str(target),
             "artifact_file_name": file_name,
         }
+
+    def execute_report_schedule(self, db: Session, schedule: ReportSchedule) -> ReportSnapshot:
+        requested_format = str(schedule.config_json.get("format", "pdf"))
+        dashboard = db.query(Dashboard).filter(Dashboard.id == schedule.dashboard_id).one_or_none() if schedule.dashboard_id else None
+        snapshot = ReportSnapshot(
+            schedule_id=schedule.id,
+            dashboard_id=schedule.dashboard_id,
+            schedule_name=schedule.name,
+            dashboard_name=dashboard.name if dashboard else None,
+            requested_format=requested_format,
+            destination=schedule.destination,
+            status="running",
+            started_at=datetime.now(timezone.utc),
+            summary_json={"delivery_note": schedule.config_json.get("deliveryNote")},
+        )
+        db.add(snapshot)
+        db.commit()
+        db.refresh(snapshot)
+
+        try:
+            if dashboard is None:
+                raise ValueError("The linked dashboard could not be found for this schedule.")
+
+            export_payload = self.build_dashboard_export(db, dashboard)
+            artifact = self._generate_report_schedule_artifact(
+                db=db,
+                schedule=schedule,
+                dashboard=dashboard,
+                snapshot=snapshot,
+                requested_format=requested_format,
+                export_payload=export_payload,
+            )
+            finished_at = datetime.now(timezone.utc)
+            snapshot.status = "success"
+            snapshot.finished_at = finished_at
+            snapshot.artifact_path = artifact["artifact_path"]
+            snapshot.artifact_file_name = artifact["artifact_file_name"]
+            snapshot.artifact_kind = artifact["artifact_kind"]
+            snapshot.summary_json = {
+                "delivery_note": schedule.config_json.get("deliveryNote"),
+                "requested_format": requested_format,
+                "artifact_kind": artifact["artifact_kind"],
+                "chart_exports": artifact.get("chart_exports", []),
+            }
+            schedule.config_json = {
+                **schedule.config_json,
+                "lastRunAt": finished_at.isoformat(),
+                "lastRunStatus": "success",
+                "lastSnapshotId": snapshot.id,
+                "lastArtifactPath": artifact["artifact_path"],
+            }
+            db.commit()
+            db.refresh(snapshot)
+            db.refresh(schedule)
+            return snapshot
+        except Exception as exc:
+            finished_at = datetime.now(timezone.utc)
+            snapshot.status = "failed"
+            snapshot.finished_at = finished_at
+            snapshot.error_message = str(exc)
+            snapshot.summary_json = {
+                "delivery_note": schedule.config_json.get("deliveryNote"),
+                "requested_format": requested_format,
+            }
+            schedule.config_json = {
+                **schedule.config_json,
+                "lastRunAt": finished_at.isoformat(),
+                "lastRunStatus": "failed",
+                "lastError": str(exc),
+                "lastSnapshotId": snapshot.id,
+            }
+            db.commit()
+            db.refresh(snapshot)
+            db.refresh(schedule)
+            return snapshot
+
+    def _generate_report_schedule_artifact(
+        self,
+        db: Session,
+        schedule: ReportSchedule,
+        dashboard: Dashboard,
+        snapshot: ReportSnapshot,
+        requested_format: str,
+        export_payload: dict,
+    ) -> dict:
+        base_dir = Path(self.settings.temp_storage_path) / "report_snapshots"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = schedule.name.strip().lower().replace(" ", "_") or "report_schedule"
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        run_dir = base_dir / f"{safe_name}_{timestamp}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        chart_exports = []
+        for chart_payload in export_payload.get("charts", []):
+            result = self.duckdb_service.execute_query(
+                chart_payload["query_sql"],
+                uploaded_files=db.query(UploadedFile).all(),
+                delta_tables=db.query(DeltaTable).all(),
+                limit=None,
+            )
+            chart_exports.append(
+                {
+                    "chart_name": chart_payload["name"],
+                    "chart_type": chart_payload["chart_type"],
+                    "columns": result["columns"],
+                    "rows": result["rows"],
+                    "arrow_table": result["arrow_table"],
+                }
+            )
+
+        (run_dir / "dashboard_export.json").write_text(json.dumps(export_payload, indent=2), encoding="utf-8")
+
+        if requested_format in {"csv", "excel"}:
+            bundle_name = f"{safe_name}_{timestamp}.{requested_format}_bundle.zip"
+            bundle_path = run_dir / bundle_name
+            with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("dashboard_export.json", json.dumps(export_payload, indent=2))
+                archive.writestr(
+                    "manifest.json",
+                    json.dumps(
+                        {
+                            "schedule_name": schedule.name,
+                            "dashboard_name": dashboard.name,
+                            "requested_format": requested_format,
+                            "generated_at": datetime.now(timezone.utc).isoformat(),
+                            "note": "Excel exports are delivered as a zipped CSV bundle in this MVP build.",
+                        },
+                        indent=2,
+                    ),
+                )
+                for index, chart_export in enumerate(chart_exports, start=1):
+                    output = BytesIO()
+                    pacsv.write_csv(chart_export["arrow_table"], output)
+                    output.seek(0)
+                    chart_slug = chart_export["chart_name"].strip().lower().replace(" ", "_") or f"chart_{index}"
+                    archive.writestr(f"{index:02d}_{chart_slug}.csv", output.read())
+            return {
+                "artifact_path": str(bundle_path),
+                "artifact_file_name": bundle_name,
+                "artifact_kind": "zip_csv_bundle",
+                "chart_exports": [{"chart_name": item["chart_name"], "row_count": len(item["rows"])} for item in chart_exports],
+            }
+
+        html_name = f"{safe_name}_{timestamp}.{requested_format}_report.html"
+        html_path = run_dir / html_name
+        html_path.write_text(self._build_html_report(schedule, dashboard, snapshot, export_payload, chart_exports, requested_format), encoding="utf-8")
+        return {
+            "artifact_path": str(html_path),
+            "artifact_file_name": html_name,
+            "artifact_kind": "html_report",
+            "chart_exports": [{"chart_name": item["chart_name"], "row_count": len(item["rows"])} for item in chart_exports],
+        }
+
+    def _build_html_report(
+        self,
+        schedule: ReportSchedule,
+        dashboard: Dashboard,
+        snapshot: ReportSnapshot,
+        export_payload: dict,
+        chart_exports: list[dict],
+        requested_format: str,
+    ) -> str:
+        sections = []
+        for chart_export in chart_exports:
+            headers = "".join(f"<th>{escape(str(column))}</th>" for column in chart_export["columns"])
+            rows = "".join(
+                "<tr>" + "".join(f"<td>{escape(str(value))}</td>" for value in row.values()) + "</tr>"
+                for row in chart_export["rows"][:50]
+            )
+            sections.append(
+                f"""
+                <section style="margin-top:32px;">
+                  <h2 style="font-size:20px;margin-bottom:8px;">{escape(chart_export['chart_name'])}</h2>
+                  <p style="color:#475569;font-size:14px;">{escape(chart_export['chart_type'])} • {len(chart_export['rows'])} rows exported</p>
+                  <div style="overflow:auto;border:1px solid #e2e8f0;border-radius:12px;margin-top:12px;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                      <thead style="background:#f8fafc;"><tr>{headers}</tr></thead>
+                      <tbody>{rows}</tbody>
+                    </table>
+                  </div>
+                </section>
+                """
+            )
+
+        return f"""
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>{escape(schedule.name)} export</title>
+          </head>
+          <body style="font-family:Arial,sans-serif;background:#f8fafc;color:#0f172a;margin:0;padding:32px;">
+            <div style="max-width:1200px;margin:0 auto;background:white;border:1px solid #e2e8f0;border-radius:24px;padding:32px;">
+              <p style="font-size:12px;letter-spacing:0.24em;text-transform:uppercase;color:#64748b;">Scheduled Report Snapshot</p>
+              <h1 style="font-size:36px;margin:12px 0 8px 0;">{escape(dashboard.name)}</h1>
+              <p style="font-size:16px;color:#475569;line-height:1.6;">{escape(dashboard.description or 'No dashboard description provided.')}</p>
+              <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:24px;">
+                <div style="background:#f8fafc;border-radius:16px;padding:16px;"><strong>Requested Format</strong><div style="margin-top:8px;">{escape(requested_format)}</div></div>
+                <div style="background:#f8fafc;border-radius:16px;padding:16px;"><strong>Generated At</strong><div style="margin-top:8px;">{escape(snapshot.started_at.isoformat() if snapshot.started_at else datetime.now(timezone.utc).isoformat())}</div></div>
+                <div style="background:#f8fafc;border-radius:16px;padding:16px;"><strong>Delivery Note</strong><div style="margin-top:8px;">{escape(str(schedule.config_json.get('deliveryNote', 'None')))}</div></div>
+              </div>
+              <div style="margin-top:24px;padding:16px;border-radius:16px;background:#ecfeff;color:#155e75;">
+                This MVP report export produces an HTML report artifact for requested {escape(requested_format).upper()} output so the schedule generates a usable stored file without needing a separate PDF/PNG renderer.
+              </div>
+              {''.join(sections)}
+            </div>
+          </body>
+        </html>
+        """
 
     def replace_dashboard_widgets(self, db: Session, dashboard: Dashboard, widgets: list[dict]) -> list[DashboardWidget]:
         db.query(DashboardWidget).filter(DashboardWidget.dashboard_id == dashboard.id).delete()

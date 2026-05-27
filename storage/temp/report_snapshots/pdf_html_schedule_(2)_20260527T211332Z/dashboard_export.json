@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "exported_at": "2026-05-27T21:13:32.742743+00:00",
+  "dashboard": {
+    "name": "Scheduler Dashboard (2)",
+    "description": "Dashboard for report execution test",
+    "layout_json": {
+      "cols": 12,
+      "rowHeight": 28
+    },
+    "filters_json": []
+  },
+  "widgets": [
+    {
+      "widget_type": "chart",
+      "title": "Revenue Widget",
+      "layout_json": {
+        "i": "chart_1",
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 8
+      },
+      "config_json": {},
+      "chart_source_id": "d4c2a310-ffa9-4d7b-b605-1c9c7c984d41"
+    }
+  ],
+  "charts": [
+    {
+      "source_chart_id": "d4c2a310-ffa9-4d7b-b605-1c9c7c984d41",
+      "name": "Revenue by Region",
+      "chart_type": "bar",
+      "dataset_id": null,
+      "query_sql": "SELECT * FROM (VALUES ('West', 1200), ('East', 900), ('North', 650)) AS t(dimension, amount_sum)",
+      "config_json": {
+        "metricAlias": "amount_sum",
+        "numberFormat": "currency"
+      }
+    }
+  ]
+}

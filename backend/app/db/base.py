@@ -1,4 +1,4 @@
-from app.models.bi import Chart, Dashboard, DashboardWidget, ReportSchedule, SemanticDataset
+from app.models.bi import Chart, Dashboard, DashboardWidget, ReportSchedule, ReportSnapshot, SemanticDataset
 from app.models.catalog import DeltaTable, QueryHistory, UploadedFile
 from app.models.pipeline import JobLog, Pipeline, PipelineRun
 
@@ -14,4 +14,5 @@ __all__ = [
     "Dashboard",
     "DashboardWidget",
     "ReportSchedule",
+    "ReportSnapshot",
 ]

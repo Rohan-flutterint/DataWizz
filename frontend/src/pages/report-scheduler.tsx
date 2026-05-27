@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
+import { StatusBadge } from '../components/status-badge'
 import { api } from '../lib/api'
 import { formatDate } from '../lib/utils'
 
@@ -17,13 +18,14 @@ export function ReportSchedulerPage() {
   const queryClient = useQueryClient()
   const dashboardsQuery = useQuery({ queryKey: ['bi', 'dashboards'], queryFn: api.listDashboards })
   const schedulesQuery = useQuery({ queryKey: ['bi', 'report-schedules'], queryFn: api.listReportSchedules })
+  const snapshotsQuery = useQuery({ queryKey: ['bi', 'report-snapshots'], queryFn: api.listReportSnapshots })
   const [name, setName] = useState('Weekly Sales Dashboard Snapshot')
   const [frequency, setFrequency] = useState('weekly')
   const [dashboardId, setDashboardId] = useState('')
   const [destination, setDestination] = useState('local_export')
   const [format, setFormat] = useState('pdf')
   const [deliveryNote, setDeliveryNote] = useState('Export this dashboard snapshot for internal review.')
-  const [statusMessage, setStatusMessage] = useState('Create recurring dashboard snapshots for demo-friendly reporting workflows.')
+  const [statusMessage, setStatusMessage] = useState('Create recurring dashboard snapshots, run them on demand, and retain a real artifact history in local storage.')
 
   useEffect(() => {
     if (!dashboardId && dashboardsQuery.data?.items?.[0]) {
@@ -58,6 +60,22 @@ export function ReportSchedulerPage() {
     },
   })
 
+  const runMutation = useMutation({
+    mutationFn: api.runReportSchedule,
+    onSuccess: ({ schedule, snapshot }) => {
+      queryClient.invalidateQueries({ queryKey: ['bi', 'report-schedules'] })
+      queryClient.invalidateQueries({ queryKey: ['bi', 'report-snapshots'] })
+      setStatusMessage(
+        snapshot.status === 'success'
+          ? `Executed ${schedule.name}. Artifact written to ${snapshot.artifact_path}.`
+          : `Execution failed for ${schedule.name}: ${snapshot.error_message ?? 'Unknown error'}`,
+      )
+    },
+    onError: (error: Error) => {
+      setStatusMessage(error.message)
+    },
+  })
+
   const saveSchedule = () => {
     createMutation.mutate({
       name,
@@ -83,11 +101,11 @@ export function ReportSchedulerPage() {
       <Panel className="grid gap-4 xl:grid-cols-[1fr_0.85fr_1fr]">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Scheduling Flow</p>
-          <p className="mt-2 text-sm leading-6 text-slate/75">Choose a dashboard, pick a cadence, define the export format, and store the schedule metadata for later delivery automation.</p>
+          <p className="mt-2 text-sm leading-6 text-slate/75">Choose a dashboard, pick a cadence, define the export format, and execute report runs that generate stored artifacts into the local `storage/` workspace.</p>
         </div>
         <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate/75">
-          <p className="font-semibold text-ink">Current Scope</p>
-          <p className="mt-2 leading-6">Schedules are stored as metadata today. This sets up future PDF generation, email delivery, and notification workflows.</p>
+          <p className="font-semibold text-ink">Execution Scope</p>
+          <p className="mt-2 leading-6">CSV and Excel requests generate zipped CSV bundles. PDF and PNG requests generate a render-ready HTML report artifact in this MVP so every schedule run stores a usable file and history record.</p>
         </div>
         <div className="rounded-2xl bg-cyan-50 p-4 text-sm text-lagoon">
           <p className="font-semibold">Scheduler Status</p>
@@ -204,15 +222,27 @@ export function ReportSchedulerPage() {
                         <p className="font-semibold text-ink">{schedule.name}</p>
                         <p className="mt-2 text-sm text-slate/70">{linkedDashboard?.name || 'No linked dashboard'} • {schedule.frequency}</p>
                       </div>
-                      <Button tone="danger" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(schedule.id)}>
-                        Delete
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button tone="ghost" disabled={runMutation.isPending} onClick={() => runMutation.mutate(schedule.id)}>
+                          {runMutation.isPending ? 'Running...' : 'Run Now'}
+                        </Button>
+                        <Button tone="danger" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(schedule.id)}>
+                          Delete
+                        </Button>
+                      </div>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700">Destination: {schedule.destination}</span>
                       <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700">Format: {String(schedule.config_json.format ?? 'n/a')}</span>
                       <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700">Next run: {String(schedule.config_json.nextRunEstimate ?? 'n/a')}</span>
+                      {schedule.config_json.lastRunStatus ? <StatusBadge status={String(schedule.config_json.lastRunStatus)} /> : null}
                     </div>
+                    {schedule.config_json.lastArtifactPath ? (
+                      <div className="mt-3 rounded-2xl bg-white px-4 py-3 text-sm text-slate/70">
+                        <p className="font-semibold text-ink">Latest Artifact</p>
+                        <p className="mt-2 break-all">{String(schedule.config_json.lastArtifactPath)}</p>
+                      </div>
+                    ) : null}
                     <p className="mt-3 text-xs uppercase tracking-[0.2em] text-slate/50">Updated {formatDate(schedule.updated_at)}</p>
                   </div>
                 )
@@ -223,6 +253,61 @@ export function ReportSchedulerPage() {
           </div>
         </Panel>
       </div>
+
+      <Panel>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Snapshot History</p>
+            <h2 className="font-display text-2xl text-ink">Execution Timeline</h2>
+          </div>
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate/65">
+            {snapshotsQuery.data?.items?.length ?? 0}
+          </span>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {snapshotsQuery.data?.items?.length ? (
+            snapshotsQuery.data.items.map((snapshot) => (
+              <div key={snapshot.id} className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="font-semibold text-ink">{snapshot.schedule_name}</p>
+                    <p className="mt-1 text-sm text-slate/70">{snapshot.dashboard_name || 'No dashboard linked'} • {snapshot.requested_format}</p>
+                  </div>
+                  <StatusBadge status={snapshot.status} />
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  <div className="rounded-2xl bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate/50">Artifact Kind</p>
+                    <p className="mt-2 text-sm font-semibold text-ink">{snapshot.artifact_kind || 'pending'}</p>
+                  </div>
+                  <div className="rounded-2xl bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate/50">Started</p>
+                    <p className="mt-2 text-sm font-semibold text-ink">{snapshot.started_at ? formatDate(snapshot.started_at) : 'n/a'}</p>
+                  </div>
+                  <div className="rounded-2xl bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate/50">Finished</p>
+                    <p className="mt-2 text-sm font-semibold text-ink">{snapshot.finished_at ? formatDate(snapshot.finished_at) : 'n/a'}</p>
+                  </div>
+                </div>
+                {snapshot.artifact_path ? (
+                  <div className="mt-3 rounded-2xl bg-white px-4 py-3 text-sm text-slate/70">
+                    <p className="font-semibold text-ink">Stored Artifact</p>
+                    <p className="mt-2 break-all">{snapshot.artifact_path}</p>
+                  </div>
+                ) : null}
+                {snapshot.error_message ? (
+                  <div className="mt-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    {snapshot.error_message}
+                  </div>
+                ) : null}
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No snapshot history yet" description="Run a saved schedule to generate stored artifacts and populate the execution timeline." />
+          )}
+        </div>
+      </Panel>
     </div>
   )
 }
