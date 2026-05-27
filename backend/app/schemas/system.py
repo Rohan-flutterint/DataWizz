@@ -21,3 +21,15 @@ class DashboardMetricsResponse(BaseModel):
 class SettingsSnapshotResponse(BaseModel):
     storage: dict
     execution: dict
+
+
+class SupersetHealthResponse(BaseModel):
+    status: str
+    reachable: bool
+    checked_url: str
+    http_status: int | None = None
+    detail: str | None = None
+    login: dict
+    sample_connections: list[dict]
+    sample_datasets: list[dict]
+    setup: dict

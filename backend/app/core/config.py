@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     execution_engine: str = "duckdb"
     query_preview_limit: int = 200
     allow_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    superset_url: str = "http://localhost:8088"
+    superset_username: str = "admin"
+    superset_password: str = "admin"
 
 
 @lru_cache
