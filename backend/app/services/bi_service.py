@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 
-from app.models.bi import Dashboard, DashboardWidget, SemanticDataset
+from app.models.bi import Dashboard, DashboardWidget, ReportSchedule, SemanticDataset
 from app.models.catalog import DeltaTable, UploadedFile
 from app.services.duckdb_service import DuckDBService
 
@@ -44,6 +44,17 @@ class BiService:
         suffix = 2
 
         while db.query(Dashboard).filter(Dashboard.name == candidate).one_or_none() is not None:
+            candidate = f"{base_name} ({suffix})"
+            suffix += 1
+
+        return candidate
+
+    def resolve_report_schedule_name(self, db: Session, desired_name: str) -> str:
+        base_name = desired_name.strip() or "Untitled Report Schedule"
+        candidate = base_name
+        suffix = 2
+
+        while db.query(ReportSchedule).filter(ReportSchedule.name == candidate).one_or_none() is not None:
             candidate = f"{base_name} ({suffix})"
             suffix += 1
 

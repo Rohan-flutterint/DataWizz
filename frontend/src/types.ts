@@ -183,3 +183,14 @@ export type QueryResult = {
   row_count: number
   execution_ms: number
 }
+
+export type ReportSchedule = {
+  id: string
+  name: string
+  dashboard_id?: string
+  frequency: string
+  destination: string
+  config_json: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}

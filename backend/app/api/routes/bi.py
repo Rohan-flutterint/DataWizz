@@ -16,6 +16,7 @@ from app.schemas.bi import (
     DatasetPreviewResponse,
     DatasetExplorerResponse,
     ReportScheduleCreateRequest,
+    ReportScheduleListResponse,
     ReportScheduleRead,
     SemanticDatasetCreateRequest,
     SemanticDatasetRead,
@@ -139,8 +140,30 @@ def get_dashboard(dashboard_id: str, db: Session = Depends(get_db)) -> Dashboard
 
 @router.post("/report-schedules", response_model=ReportScheduleRead)
 def create_report_schedule(payload: ReportScheduleCreateRequest, db: Session = Depends(get_db)) -> ReportScheduleRead:
-    record = ReportSchedule(**payload.model_dump())
+    data = payload.model_dump()
+    data["name"] = bi_service.resolve_report_schedule_name(db, payload.name)
+    record = ReportSchedule(**data)
     db.add(record)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A report schedule with this name already exists. Please try again.") from exc
     db.refresh(record)
     return record
+
+
+@router.get("/report-schedules", response_model=ReportScheduleListResponse)
+def list_report_schedules(db: Session = Depends(get_db)) -> ReportScheduleListResponse:
+    items = db.query(ReportSchedule).order_by(ReportSchedule.updated_at.desc()).all()
+    return ReportScheduleListResponse(items=items)
+
+
+@router.delete("/report-schedules/{schedule_id}", response_model=ApiMessage)
+def delete_report_schedule(schedule_id: str, db: Session = Depends(get_db)) -> ApiMessage:
+    record = db.query(ReportSchedule).filter(ReportSchedule.id == schedule_id).one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Report schedule not found")
+    db.delete(record)
+    db.commit()
+    return ApiMessage(message="Report schedule deleted successfully")
