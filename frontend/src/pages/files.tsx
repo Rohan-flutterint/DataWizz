@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useRef, useState } from 'react'
+import { type DragEvent, useRef, useState } from 'react'
 import { DataTable } from '../components/data-table'
 import { StatusBadge } from '../components/status-badge'
 import { Button, EmptyState, PageHeader, Panel } from '../components/ui'
@@ -11,6 +11,7 @@ export function FileExplorerPage() {
   const queryClient = useQueryClient()
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [isDragActive, setIsDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const filesQuery = useQuery({ queryKey: ['files'], queryFn: api.listFiles })
@@ -49,6 +50,34 @@ export function FileExplorerPage() {
     },
   })
 
+  const handleUploadFile = (file: File | null | undefined) => {
+    if (!file) return
+    uploadMutation.mutate(file)
+  }
+
+  const handleDragState = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!uploadMutation.isPending) {
+      setIsDragActive(true)
+    }
+  }
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setIsDragActive(false)
+  }
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setIsDragActive(false)
+    if (uploadMutation.isPending) return
+    const file = event.dataTransfer.files?.[0]
+    handleUploadFile(file)
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -64,8 +93,7 @@ export function FileExplorerPage() {
               accept=".csv,.json,.parquet"
               className="hidden"
               onChange={(event) => {
-                const file = event.target.files?.[0]
-                if (file) uploadMutation.mutate(file)
+                handleUploadFile(event.target.files?.[0])
               }}
             />
           </label>
@@ -73,6 +101,48 @@ export function FileExplorerPage() {
       />
 
       {uploadError ? <Panel className="border-rose-200 bg-rose-50 text-sm text-rose-700">{uploadError}</Panel> : null}
+
+      <Panel
+        className={`border-2 border-dashed transition ${
+          isDragActive ? 'border-lagoon bg-cyan-50/70 shadow-sm' : 'border-slate-200 bg-gradient-to-br from-slate-50 to-white'
+        } ${uploadMutation.isPending ? 'opacity-80' : ''}`}
+        onDragEnter={handleDragState}
+        onDragOver={handleDragState}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Quick Ingest</p>
+            <h2 className="mt-2 font-display text-3xl text-ink">
+              {isDragActive ? 'Drop file to upload into the raw zone' : 'Drag and drop raw files here'}
+            </h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate/70">
+              Supports CSV, JSON, and Parquet. You can still use the upload button, but drag-and-drop is faster for demo flows and repeated local testing.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate/60">
+              <span className="rounded-full bg-white px-3 py-1 font-medium">CSV</span>
+              <span className="rounded-full bg-white px-3 py-1 font-medium">JSON</span>
+              <span className="rounded-full bg-white px-3 py-1 font-medium">Parquet</span>
+              <span className="rounded-full bg-white px-3 py-1 font-medium">
+                {uploadMutation.isPending ? 'Upload in progress' : 'Single file upload'}
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-col items-start gap-3 lg:items-end">
+            <Button
+              tone="ghost"
+              disabled={uploadMutation.isPending}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {uploadMutation.isPending ? 'Uploading...' : 'Choose File'}
+            </Button>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate/50">
+              {isDragActive ? 'Release to upload' : 'Or drop a file onto this panel'}
+            </p>
+          </div>
+        </div>
+      </Panel>
 
       <div className="grid gap-5 xl:grid-cols-[1.1fr_1fr]">
         <Panel>

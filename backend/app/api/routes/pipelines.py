@@ -121,6 +121,21 @@ def run_pipeline(pipeline_id: str, db: Session = Depends(get_db)) -> PipelineRun
     return PipelineRunResponse(run=_to_pipeline_run_read(run, db), logs=logs)
 
 
+@router.post("/runs/{run_id}/retry", response_model=PipelineRunResponse)
+def retry_run(run_id: str, db: Session = Depends(get_db)) -> PipelineRunResponse:
+    previous_run = db.query(PipelineRun).filter(PipelineRun.id == run_id).one_or_none()
+    if previous_run is None:
+        raise HTTPException(status_code=404, detail="Pipeline run not found")
+
+    record = db.query(Pipeline).filter(Pipeline.id == previous_run.pipeline_id).one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Pipeline not found for this run")
+
+    run = pipeline_service.execute_pipeline(db, record, trigger_type="retry", retry_of_run_id=previous_run.id)
+    logs = db.query(JobLog).filter(JobLog.pipeline_run_id == run.id).order_by(JobLog.created_at.asc()).all()
+    return PipelineRunResponse(run=_to_pipeline_run_read(run, db), logs=logs)
+
+
 @router.get("/runs/all", response_model=PipelineRunListResponse)
 def list_runs(db: Session = Depends(get_db)) -> PipelineRunListResponse:
     items = db.query(PipelineRun).order_by(PipelineRun.created_at.desc()).limit(100).all()
