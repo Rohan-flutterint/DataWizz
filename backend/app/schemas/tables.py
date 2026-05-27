@@ -15,6 +15,10 @@ class DeltaTableRead(TimestampedModel):
     source_query: str | None = None
     row_count: int | None = None
     last_refreshed_at: datetime | None = None
+    owner: str | None = None
+    tags: list[str] | None = None
+    freshness_status: str | None = None
+    lineage_hint: str | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 
@@ -27,3 +31,9 @@ class DeltaTablePreviewResponse(BaseModel):
     table: DeltaTableRead
     columns: list[str]
     rows: list[dict]
+
+
+class DeltaTableMetadataUpdateRequest(BaseModel):
+    owner: str | None = None
+    tags: list[str] | None = None
+    lineage_hint: str | None = None

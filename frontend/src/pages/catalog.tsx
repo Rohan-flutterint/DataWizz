@@ -1,21 +1,52 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DataTable } from '../components/data-table'
-import { EmptyState, Input, PageHeader, Panel, Select, StatCard } from '../components/ui'
+import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, StatCard, Textarea } from '../components/ui'
 import { api } from '../lib/api'
 import { formatDate } from '../lib/utils'
 
+function freshnessTone(status?: string) {
+  if (status === 'fresh') return 'bg-emerald-50 text-emerald-700'
+  if (status === 'aging') return 'bg-amber-50 text-amber-700'
+  if (status === 'stale') return 'bg-rose-50 text-rose-700'
+  return 'bg-slate-100 text-slate-700'
+}
+
 export function CatalogPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [schemaFilter, setSchemaFilter] = useState('all')
+  const [ownerDraft, setOwnerDraft] = useState('')
+  const [tagsDraft, setTagsDraft] = useState('')
+  const [lineageDraft, setLineageDraft] = useState('')
+  const [statusMessage, setStatusMessage] = useState('Select a curated table to inspect governance metadata, ownership, freshness, and lineage hints.')
   const tablesQuery = useQuery({ queryKey: ['tables'], queryFn: api.listTables })
   const previewQuery = useQuery({
     queryKey: ['tables', selectedTableId, 'preview'],
     queryFn: () => api.previewTable(selectedTableId!),
     enabled: Boolean(selectedTableId),
+  })
+  const updateMetadataMutation = useMutation({
+    mutationFn: async (payload: { tableId: string; owner?: string; tags?: string[]; lineage_hint?: string }) =>
+      api.updateTableMetadata(payload.tableId, { owner: payload.owner, tags: payload.tags, lineage_hint: payload.lineage_hint }),
+    onSuccess: (table) => {
+      queryClient.invalidateQueries({ queryKey: ['tables'] })
+      queryClient.invalidateQueries({ queryKey: ['tables', table.id, 'preview'] })
+      setStatusMessage(`Updated catalog governance metadata for ${table.schema_name}.${table.name}.`)
+    },
+    onError: (error: Error) => setStatusMessage(error.message),
+  })
+  const refreshMutation = useMutation({
+    mutationFn: api.refreshTableMetadata,
+    onSuccess: (table) => {
+      queryClient.invalidateQueries({ queryKey: ['tables'] })
+      queryClient.invalidateQueries({ queryKey: ['tables', table.id, 'preview'] })
+      setStatusMessage(`Refreshed metadata for ${table.schema_name}.${table.name}.`)
+    },
+    onError: (error: Error) => setStatusMessage(error.message),
   })
 
   const tables = tablesQuery.data?.items ?? []
@@ -67,12 +98,20 @@ export function CatalogPage() {
   }, [filteredTables])
 
   const selectedTable = tables.find((table) => table.id === selectedTableId) ?? null
-  const totalRows = tables.reduce((sum, table) => sum + (table.row_count ?? 0), 0)
+  const freshTables = tables.filter((table) => table.freshness_status === 'fresh').length
   const latestRefresh = tables
     .map((table) => table.last_refreshed_at ?? table.updated_at)
     .filter(Boolean)
     .sort()
     .at(-1)
+
+  useEffect(() => {
+    if (!selectedTable) return
+    setOwnerDraft(selectedTable.owner ?? '')
+    setTagsDraft((selectedTable.tags ?? []).join(', '))
+    setLineageDraft(selectedTable.lineage_hint ?? '')
+    setStatusMessage(`Inspecting ${selectedTable.schema_name}.${selectedTable.name}.`)
+  }, [selectedTableId, selectedTable])
 
   return (
     <div className="space-y-6">
@@ -85,9 +124,14 @@ export function CatalogPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Delta Tables" value={String(tables.length)} accent="bg-[#ffe2de]" subtext="Curated assets published into the lakehouse." />
         <StatCard label="Schemas" value={String(schemaOptions.length - 1)} accent="bg-[#d8f1ff]" subtext="Logical namespaces available to analysts and pipelines." />
-        <StatCard label="Visible Rows" value={Intl.NumberFormat('en-IN').format(totalRows)} accent="bg-[#e6f7eb]" subtext="Approximate row counts tracked across curated tables." />
+        <StatCard label="Fresh Assets" value={String(freshTables)} accent="bg-[#e6f7eb]" subtext="Curated tables refreshed recently enough to be considered fresh." />
         <StatCard label="Latest Refresh" value={latestRefresh ? formatDate(latestRefresh) : 'N/A'} accent="bg-[#fff4d6]" subtext="Most recently updated curated asset in the catalog." />
       </div>
+
+      <Panel className="rounded-2xl bg-cyan-50 p-4 text-sm text-lagoon">
+        <p className="font-semibold">Catalog Status</p>
+        <p className="mt-2 leading-6">{statusMessage}</p>
+      </Panel>
 
       {!tables.length ? (
         <EmptyState
@@ -143,6 +187,12 @@ export function CatalogPage() {
                             {table.mode}
                           </span>
                         </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <span className={`rounded-full px-3 py-1 text-xs font-medium ${freshnessTone(table.freshness_status)}`}>
+                            {table.freshness_status || 'unknown'}
+                          </span>
+                          {table.owner ? <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700">{table.owner}</span> : null}
+                        </div>
                         <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate/60">
                           <span>{table.row_count ?? 0} rows</span>
                           <span>•</span>
@@ -177,17 +227,32 @@ export function CatalogPage() {
                       <p className="mt-3 max-w-3xl text-sm leading-6 text-slate/70">
                         {selectedTable.description || 'This curated table is available for SQL exploration, downstream pipelines, and BI reporting.'}
                       </p>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${freshnessTone(selectedTable.freshness_status)}`}>
+                          {selectedTable.freshness_status || 'unknown'}
+                        </span>
+                        {selectedTable.tags?.map((tag) => (
+                          <span key={tag} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/sql?table=${encodeURIComponent(selectedTable.name)}`)}
-                      className="inline-flex items-center justify-center rounded-lg bg-[#ff3621] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#e52c19]"
-                    >
-                      Open In SQL Workspace
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button tone="ghost" disabled={refreshMutation.isPending} onClick={() => refreshMutation.mutate(selectedTable.id)}>
+                        {refreshMutation.isPending ? 'Refreshing...' : 'Refresh Metadata'}
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/sql?table=${encodeURIComponent(selectedTable.name)}`)}
+                        className="inline-flex items-center justify-center rounded-lg bg-[#ff3621] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#e52c19]"
+                      >
+                        Open In SQL Workspace
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                     <div className="rounded-2xl bg-slate-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Rows</p>
                       <p className="mt-2 font-display text-2xl text-ink">{Intl.NumberFormat('en-IN').format(selectedTable.row_count ?? 0)}</p>
@@ -204,6 +269,10 @@ export function CatalogPage() {
                       <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Last Refresh</p>
                       <p className="mt-2 text-sm font-semibold text-ink">{formatDate(selectedTable.last_refreshed_at ?? selectedTable.updated_at)}</p>
                     </div>
+                    <div className="rounded-2xl bg-slate-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Owner</p>
+                      <p className="mt-2 text-sm font-semibold text-ink">{selectedTable.owner || 'Unassigned'}</p>
+                    </div>
                   </div>
 
                   <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
@@ -212,8 +281,8 @@ export function CatalogPage() {
                       <p className="mt-2 break-all text-ink">{selectedTable.storage_path}</p>
                     </div>
                     <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate/75">
-                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Source Query</p>
-                      <p className="mt-2 line-clamp-4 font-mono text-xs text-ink">{selectedTable.source_query || 'Written from a pipeline or query result without a retained source SQL string.'}</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Lineage Hint</p>
+                      <p className="mt-2 line-clamp-4 text-ink">{selectedTable.lineage_hint || 'Lineage hint unavailable.'}</p>
                     </div>
                   </div>
                 </Panel>
@@ -235,6 +304,44 @@ export function CatalogPage() {
                   </Panel>
 
                   <div className="space-y-4">
+                    <Panel className="space-y-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Catalog Governance</p>
+                          <h3 className="mt-2 font-display text-2xl text-ink">Ownership, Tags, and Lineage</h3>
+                        </div>
+                        <Button
+                          disabled={updateMetadataMutation.isPending}
+                          onClick={() =>
+                            updateMetadataMutation.mutate({
+                              tableId: selectedTable.id,
+                              owner: ownerDraft,
+                              tags: tagsDraft
+                                .split(',')
+                                .map((tag) => tag.trim())
+                                .filter(Boolean),
+                              lineage_hint: lineageDraft,
+                            })
+                          }
+                        >
+                          {updateMetadataMutation.isPending ? 'Saving...' : 'Save Metadata'}
+                        </Button>
+                      </div>
+                      <div className="grid gap-4">
+                        <div>
+                          <Label>Owner</Label>
+                          <Input value={ownerDraft} onChange={(event) => setOwnerDraft(event.target.value)} placeholder="analytics_engineering" />
+                        </div>
+                        <div>
+                          <Label>Tags</Label>
+                          <Input value={tagsDraft} onChange={(event) => setTagsDraft(event.target.value)} placeholder="delta, analytics, finance" />
+                        </div>
+                        <div>
+                          <Label>Lineage Hint</Label>
+                          <Textarea rows={4} value={lineageDraft} onChange={(event) => setLineageDraft(event.target.value)} />
+                        </div>
+                      </div>
+                    </Panel>
                     <Panel className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Preview Sample</p>
