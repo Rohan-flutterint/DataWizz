@@ -1,4 +1,8 @@
+import json
+from io import BytesIO
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -14,7 +18,12 @@ from app.schemas.bi import (
     DashboardListResponse,
     DashboardCreateRequest,
     DashboardDetailResponse,
+    DashboardExportPayload,
+    DashboardImportRequest,
+    DashboardImportResponse,
     DashboardUpdateRequest,
+    DashboardSnapshotRequest,
+    DashboardSnapshotResponse,
     DatasetPreviewResponse,
     DatasetExplorerResponse,
     ReportScheduleCreateRequest,
@@ -182,12 +191,52 @@ def update_dashboard(dashboard_id: str, payload: DashboardUpdateRequest, db: Ses
     return DashboardDetailResponse(dashboard=dashboard, widgets=widgets)
 
 
+@router.get("/dashboards/{dashboard_id}/export")
+def export_dashboard(dashboard_id: str, db: Session = Depends(get_db)) -> StreamingResponse:
+    dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).one_or_none()
+    if dashboard is None:
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+    payload = DashboardExportPayload(**bi_service.build_dashboard_export(db, dashboard))
+    output = BytesIO(payload.model_dump_json(indent=2).encode("utf-8"))
+    safe_name = dashboard.name.strip().lower().replace(" ", "_") or "dashboard"
+    return StreamingResponse(
+        output,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.dashboard.json"'},
+    )
+
+
+@router.post("/dashboards/import", response_model=DashboardImportResponse)
+def import_dashboard(payload: DashboardImportRequest, db: Session = Depends(get_db)) -> DashboardImportResponse:
+    try:
+        dashboard, widgets, imported_charts = bi_service.import_dashboard_export(db, payload.model_dump())
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid dashboard config: {exc}") from exc
+    return DashboardImportResponse(dashboard=dashboard, widgets=widgets, imported_charts=imported_charts)
+
+
+@router.post("/dashboards/{dashboard_id}/snapshots", response_model=DashboardSnapshotResponse)
+def create_dashboard_snapshot(dashboard_id: str, payload: DashboardSnapshotRequest, db: Session = Depends(get_db)) -> DashboardSnapshotResponse:
+    dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).one_or_none()
+    if dashboard is None:
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+    export_payload = bi_service.build_dashboard_export(db, dashboard)
+    artifact = bi_service.create_dashboard_snapshot_artifact(dashboard.name, payload.format, export_payload)
+    return DashboardSnapshotResponse(
+        message=f"Created {payload.format.upper()} snapshot manifest for {dashboard.name}.",
+        requested_format=payload.format,
+        dashboard_name=dashboard.name,
+        artifact_path=artifact["artifact_path"],
+        artifact_file_name=artifact["artifact_file_name"],
+    )
+
+
 @router.get("/dashboards/{dashboard_id}", response_model=DashboardDetailResponse)
 def get_dashboard(dashboard_id: str, db: Session = Depends(get_db)) -> DashboardDetailResponse:
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).one_or_none()
     if dashboard is None:
         raise HTTPException(status_code=404, detail="Dashboard not found")
-    widgets = db.query(DashboardWidget).filter(DashboardWidget.dashboard_id == dashboard_id).order_by(DashboardWidget.created_at.asc()).all()
+    widgets = bi_service.list_dashboard_widgets(db, dashboard_id)
     return DashboardDetailResponse(dashboard=dashboard, widgets=widgets)
 
 

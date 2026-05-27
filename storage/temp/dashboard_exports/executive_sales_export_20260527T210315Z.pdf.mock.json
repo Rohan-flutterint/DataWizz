@@ -1,0 +1,76 @@
+{
+  "kind": "dashboard_snapshot_mock",
+  "requested_format": "pdf",
+  "dashboard_name": "Executive Sales Export",
+  "generated_at": "2026-05-27T21:03:15.069613+00:00",
+  "note": "This is a demo snapshot manifest. A real renderer can later replace this with an actual PDF or PNG artifact.",
+  "dashboard_export": {
+    "version": "1.0",
+    "exported_at": "2026-05-27T21:03:15.069233+00:00",
+    "dashboard": {
+      "name": "Executive Sales Export",
+      "description": "Dashboard to export and import",
+      "layout_json": {
+        "cols": 12,
+        "rowHeight": 28
+      },
+      "filters_json": [
+        {
+          "id": "region_filter",
+          "name": "Region",
+          "type": "dropdown",
+          "field": "dimension",
+          "appliesTo": "all",
+          "options": [
+            "West",
+            "East"
+          ]
+        }
+      ]
+    },
+    "widgets": [
+      {
+        "widget_type": "chart",
+        "title": "Revenue Widget",
+        "layout_json": {
+          "i": "chart_1",
+          "x": 0,
+          "y": 0,
+          "w": 6,
+          "h": 8
+        },
+        "config_json": {},
+        "chart_source_id": "0ba14f19-003e-4138-a5e1-24a46bcfaabd"
+      },
+      {
+        "widget_type": "note",
+        "title": "Narrative",
+        "layout_json": {
+          "i": "note_1",
+          "x": 6,
+          "y": 0,
+          "w": 6,
+          "h": 6
+        },
+        "config_json": {
+          "noteText": "Exported dashboard note"
+        },
+        "chart_source_id": null
+      }
+    ],
+    "charts": [
+      {
+        "source_chart_id": "0ba14f19-003e-4138-a5e1-24a46bcfaabd",
+        "name": "Revenue by Region",
+        "chart_type": "bar",
+        "dataset_id": "e05a459d-3fcf-4888-9a7c-2c98d544abdf",
+        "query_sql": "SELECT region AS dimension, SUM(amount) AS amount_sum FROM raw_sales GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
+        "config_json": {
+          "metricAlias": "amount_sum",
+          "dimensionKey": "region",
+          "numberFormat": "currency"
+        }
+      }
+    ]
+  }
+}

@@ -129,6 +129,60 @@ class DashboardDetailResponse(BaseModel):
     widgets: list[DashboardWidgetRead]
 
 
+class DashboardExportChartPayload(BaseModel):
+    source_chart_id: str
+    name: str
+    chart_type: str
+    dataset_id: str | None = None
+    query_sql: str
+    config_json: dict = Field(default_factory=dict)
+
+
+class DashboardExportWidgetPayload(BaseModel):
+    widget_type: str
+    title: str
+    layout_json: dict
+    config_json: dict = Field(default_factory=dict)
+    chart_source_id: str | None = None
+
+
+class DashboardExportDashboardPayload(BaseModel):
+    name: str
+    description: str | None = None
+    layout_json: dict = Field(default_factory=dict)
+    filters_json: list[dict] | None = None
+
+
+class DashboardExportPayload(BaseModel):
+    version: str = "1.0"
+    exported_at: str
+    dashboard: DashboardExportDashboardPayload
+    widgets: list[DashboardExportWidgetPayload] = Field(default_factory=list)
+    charts: list[DashboardExportChartPayload] = Field(default_factory=list)
+
+
+class DashboardImportRequest(BaseModel):
+    config: DashboardExportPayload
+
+
+class DashboardImportResponse(BaseModel):
+    dashboard: DashboardRead
+    widgets: list[DashboardWidgetRead]
+    imported_charts: list[ChartRead] = Field(default_factory=list)
+
+
+class DashboardSnapshotRequest(BaseModel):
+    format: str = Field(pattern="^(pdf|png)$")
+
+
+class DashboardSnapshotResponse(BaseModel):
+    message: str
+    requested_format: str
+    dashboard_name: str
+    artifact_path: str
+    artifact_file_name: str
+
+
 class ReportScheduleCreateRequest(BaseModel):
     name: str
     dashboard_id: str | None = None

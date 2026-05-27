@@ -1,5 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import GridLayout, { type Layout } from 'react-grid-layout'
 import 'react-grid-layout/css/styles.css'
@@ -47,9 +47,19 @@ function defaultWidgetSize(chartType?: string) {
   return { w: 6, h: 8 }
 }
 
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  link.click()
+  window.URL.revokeObjectURL(url)
+}
+
 export function DashboardBuilderPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const importInputRef = useRef<HTMLInputElement | null>(null)
   const chartsQuery = useQuery({ queryKey: ['bi', 'charts'], queryFn: api.listCharts })
   const dashboardsQuery = useQuery({ queryKey: ['bi', 'dashboards'], queryFn: api.listDashboards })
   const [name, setName] = useState('Sales Analytics Dashboard')
@@ -178,6 +188,90 @@ export function DashboardBuilderPage() {
     },
   })
 
+  const importDashboardMutation = useMutation({
+    mutationFn: api.importDashboard,
+    onSuccess: ({ dashboard, imported_charts }) => {
+      queryClient.invalidateQueries({ queryKey: ['bi', 'dashboards'] })
+      queryClient.invalidateQueries({ queryKey: ['bi', 'charts'] })
+      setEditingDashboardId(dashboard.id)
+      setStatusMessage(
+        imported_charts.length
+          ? `Imported dashboard ${dashboard.name} with ${imported_charts.length} linked chart definitions.`
+          : `Imported dashboard ${dashboard.name}.`,
+      )
+    },
+    onError: (error: Error) => {
+      setStatusMessage(error.message)
+    },
+  })
+
+  const buildDraftExport = () => ({
+    version: '1.0',
+    exported_at: new Date().toISOString(),
+    dashboard: {
+      name,
+      description,
+      layout_json: { cols: 12, rowHeight: 28 },
+      filters_json: filters.map((filter) => ({
+        id: filter.id,
+        name: filter.name,
+        type: filter.type,
+        field: filter.field,
+        appliesTo: filter.appliesTo,
+        options: filter.optionsText
+          .split(',')
+          .map((option) => option.trim())
+          .filter(Boolean),
+        operator: filter.operator,
+        defaultValue: filter.defaultValue || null,
+        defaultStart: filter.defaultStart || null,
+        defaultEnd: filter.defaultEnd || null,
+      })),
+    },
+    widgets: widgets.map((widget) => ({
+      widget_type: widget.widgetType,
+      title: widget.title,
+      layout_json: { i: widget.i, x: widget.x, y: widget.y, w: widget.w, h: widget.h },
+      config_json: widget.widgetType === 'note' ? { noteText: widget.noteText } : {},
+      chart_source_id: widget.widgetType === 'chart' ? widget.chartId : undefined,
+    })),
+    charts: widgets
+      .filter((widget) => widget.widgetType === 'chart' && widget.chartId)
+      .map((widget) => chartById.get(widget.chartId ?? ''))
+      .filter((chart): chart is NonNullable<typeof chart> => Boolean(chart))
+      .reduce<Array<{ source_chart_id: string; name: string; chart_type: string; dataset_id?: string; query_sql: string; config_json: Record<string, unknown> }>>((accumulator, chart) => {
+        if (accumulator.some((item) => item.source_chart_id === chart.id)) return accumulator
+        accumulator.push({
+          source_chart_id: chart.id,
+          name: chart.name,
+          chart_type: chart.chart_type,
+          dataset_id: chart.dataset_id,
+          query_sql: chart.query_sql,
+          config_json: chart.config_json,
+        })
+        return accumulator
+      }, []),
+  })
+
+  const exportDraft = () => {
+    const blob = new Blob([JSON.stringify(buildDraftExport(), null, 2)], { type: 'application/json' })
+    downloadBlob(blob, `${name.trim().toLowerCase().replace(/\s+/g, '_') || 'dashboard'}.draft.dashboard.json`)
+    setStatusMessage(`Exported draft JSON for ${name}.`)
+  }
+
+  const importDashboardFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      importDashboardMutation.mutate({ config: JSON.parse(text) })
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'Failed to import dashboard JSON.')
+    } finally {
+      event.target.value = ''
+    }
+  }
+
   const addChartWidget = (chartId: string) => {
     const chart = chartById.get(chartId)
     if (!chart) return
@@ -296,6 +390,13 @@ export function DashboardBuilderPage() {
         description="Compose saved charts and narrative widgets into a draggable reporting canvas, then define shared dashboard filters that can affect multiple widgets."
         actions={
           <>
+            <input ref={importInputRef} type="file" accept="application/json,.json" className="hidden" onChange={importDashboardFile} />
+            <Button tone="ghost" onClick={() => importInputRef.current?.click()}>
+              Import Dashboard JSON
+            </Button>
+            <Button tone="ghost" onClick={exportDraft}>
+              Export Draft JSON
+            </Button>
             <Button tone="ghost" onClick={addNoteWidget}>
               Add Note Widget
             </Button>
@@ -312,8 +413,9 @@ export function DashboardBuilderPage() {
           <p className="mt-2 text-sm leading-6 text-slate/75">Add saved charts to the canvas, create dashboard-level filters like date ranges or dropdowns, and save a BI surface that feels closer to a real analytics product.</p>
         </div>
         <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate/75">
-          <p className="font-semibold text-ink">Filter Scope</p>
+          <p className="font-semibold text-ink">Config Portability</p>
           <p className="mt-2 leading-6">Dashboard filters apply to all widgets by default. You can also scope a filter to a single saved chart if needed.</p>
+          <p className="mt-2 leading-6">Use import/export JSON to move dashboards between demos, keep JSON snapshots in git, or hand off curated draft layouts internally.</p>
         </div>
         <div className="rounded-2xl bg-cyan-50 p-4 text-sm text-lagoon">
           <p className="font-semibold">Builder Status</p>
