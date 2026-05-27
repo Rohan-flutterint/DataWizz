@@ -20,8 +20,25 @@ type WidgetState = {
   noteText?: string
 }
 
+type DashboardFilterState = {
+  id: string
+  name: string
+  type: 'date_range' | 'dropdown' | 'metric'
+  field: string
+  appliesTo: 'all' | string
+  optionsText: string
+  operator: '>=' | '>' | '=' | '<=' | '<'
+  defaultValue: string
+  defaultStart: string
+  defaultEnd: string
+}
+
 function makeWidgetId(prefix: string, count: number) {
   return `${prefix}_${Date.now()}_${count}`
+}
+
+function makeFilterId(count: number) {
+  return `dashboard_filter_${Date.now()}_${count}`
 }
 
 function defaultWidgetSize(chartType?: string) {
@@ -39,7 +56,9 @@ export function DashboardBuilderPage() {
   const [chartSearch, setChartSearch] = useState('')
   const [widgets, setWidgets] = useState<WidgetState[]>([])
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null)
-  const [statusMessage, setStatusMessage] = useState('Add saved charts or note widgets to the canvas, then arrange them into a polished dashboard.')
+  const [filters, setFilters] = useState<DashboardFilterState[]>([])
+  const [selectedFilterId, setSelectedFilterId] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState('Add saved charts or note widgets to the canvas, then define dashboard-level filters before saving.')
 
   const chartById = useMemo(() => new Map((chartsQuery.data?.items ?? []).map((chart) => [chart.id, chart])), [chartsQuery.data])
 
@@ -57,6 +76,7 @@ export function DashboardBuilderPage() {
   )
 
   const selectedWidget = widgets.find((widget) => widget.i === selectedWidgetId) ?? null
+  const selectedFilter = filters.find((filter) => filter.id === selectedFilterId) ?? null
 
   useEffect(() => {
     if (!widgets.length) {
@@ -68,6 +88,17 @@ export function DashboardBuilderPage() {
       setSelectedWidgetId(widgets[0].i)
     }
   }, [selectedWidgetId, widgets])
+
+  useEffect(() => {
+    if (!filters.length) {
+      setSelectedFilterId(null)
+      return
+    }
+
+    if (!selectedFilterId || !filters.some((filter) => filter.id === selectedFilterId)) {
+      setSelectedFilterId(filters[0].id)
+    }
+  }, [filters, selectedFilterId])
 
   const widgetChartQueries = useQueries({
     queries: widgets.map((widget) => {
@@ -134,6 +165,30 @@ export function DashboardBuilderPage() {
     setStatusMessage('Added a note widget to the dashboard canvas.')
   }
 
+  const addFilter = (type: DashboardFilterState['type']) => {
+    const nextId = makeFilterId(filters.length + 1)
+    const nextFilter: DashboardFilterState = {
+      id: nextId,
+      name:
+        type === 'date_range'
+          ? 'Date Range Filter'
+          : type === 'dropdown'
+            ? 'Dropdown Filter'
+            : 'Metric Threshold',
+      type,
+      field: type === 'metric' ? 'amount_sum' : 'dimension',
+      appliesTo: 'all',
+      optionsText: type === 'dropdown' ? 'West, East, North, South' : '',
+      operator: '>=',
+      defaultValue: type === 'dropdown' ? 'West' : type === 'metric' ? '1000' : '',
+      defaultStart: '',
+      defaultEnd: '',
+    }
+    setFilters((current) => [...current, nextFilter])
+    setSelectedFilterId(nextId)
+    setStatusMessage(`Added ${nextFilter.name} to the dashboard filter bar.`)
+  }
+
   const saveDashboard = () => {
     if (!widgets.length) {
       setStatusMessage('Add at least one widget before saving the dashboard.')
@@ -144,7 +199,21 @@ export function DashboardBuilderPage() {
       name,
       description,
       layout_json: { cols: 12, rowHeight: 28 },
-      filters_json: [],
+      filters_json: filters.map((filter) => ({
+        id: filter.id,
+        name: filter.name,
+        type: filter.type,
+        field: filter.field,
+        appliesTo: filter.appliesTo,
+        options: filter.optionsText
+          .split(',')
+          .map((option) => option.trim())
+          .filter(Boolean),
+        operator: filter.operator,
+        defaultValue: filter.defaultValue || null,
+        defaultStart: filter.defaultStart || null,
+        defaultEnd: filter.defaultEnd || null,
+      })),
       widgets: widgets.map((widget) => ({
         chart_id: widget.widgetType === 'chart' ? widget.chartId : undefined,
         widget_type: widget.widgetType,
@@ -160,12 +229,17 @@ export function DashboardBuilderPage() {
     setWidgets((current) => current.map((widget) => (widget.i === selectedWidget.i ? { ...widget, ...patch } : widget)))
   }
 
+  const updateSelectedFilter = (patch: Partial<DashboardFilterState>) => {
+    if (!selectedFilter) return
+    setFilters((current) => current.map((filter) => (filter.id === selectedFilter.id ? { ...filter, ...patch } : filter)))
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Dashboard Design"
         title="Dashboard Builder"
-        description="Compose saved charts and narrative widgets into a draggable reporting canvas, then persist a polished dashboard layout for stakeholder consumption."
+        description="Compose saved charts and narrative widgets into a draggable reporting canvas, then define shared dashboard filters that can affect multiple widgets."
         actions={
           <>
             <Button tone="ghost" onClick={addNoteWidget}>
@@ -181,11 +255,11 @@ export function DashboardBuilderPage() {
       <Panel className="grid gap-4 xl:grid-cols-[1fr_0.85fr_1fr]">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Builder Flow</p>
-          <p className="mt-2 text-sm leading-6 text-slate/75">Choose saved charts from the library, add note widgets for narrative context, drag tiles into place, and save the final dashboard layout.</p>
+          <p className="mt-2 text-sm leading-6 text-slate/75">Add saved charts to the canvas, create dashboard-level filters like date ranges or dropdowns, and save a BI surface that feels closer to a real analytics product.</p>
         </div>
         <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate/75">
-          <p className="font-semibold text-ink">Widget Types</p>
-          <p className="mt-2 leading-6">Chart widgets pull from saved chart SQL. Note widgets give you space for KPI commentary and dashboard instructions.</p>
+          <p className="font-semibold text-ink">Filter Scope</p>
+          <p className="mt-2 leading-6">Dashboard filters apply to all widgets by default. You can also scope a filter to a single saved chart if needed.</p>
         </div>
         <div className="rounded-2xl bg-cyan-50 p-4 text-sm text-lagoon">
           <p className="font-semibold">Builder Status</p>
@@ -193,7 +267,7 @@ export function DashboardBuilderPage() {
         </div>
       </Panel>
 
-      <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)_320px]">
+      <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)_340px]">
         <Panel className="space-y-5">
           <div>
             <Label>Dashboard Name</Label>
@@ -233,6 +307,45 @@ export function DashboardBuilderPage() {
               )}
             </div>
           </div>
+
+          <div>
+            <div className="flex items-center justify-between">
+              <Label>Dashboard Filters</Label>
+              <div className="flex gap-2">
+                <Button tone="ghost" className="px-3 py-2 text-xs" onClick={() => addFilter('date_range')}>
+                  Date
+                </Button>
+                <Button tone="ghost" className="px-3 py-2 text-xs" onClick={() => addFilter('dropdown')}>
+                  Dropdown
+                </Button>
+                <Button tone="ghost" className="px-3 py-2 text-xs" onClick={() => addFilter('metric')}>
+                  Metric
+                </Button>
+              </div>
+            </div>
+            <div className="mt-3 space-y-2">
+              {filters.length ? (
+                filters.map((filter) => (
+                  <button
+                    key={filter.id}
+                    type="button"
+                    onClick={() => setSelectedFilterId(filter.id)}
+                    className={`w-full rounded-2xl border p-4 text-left transition ${
+                      selectedFilterId === filter.id ? 'border-lagoon bg-cyan-50/70 shadow-sm' : 'border-slate-100 bg-slate-50/80'
+                    }`}
+                  >
+                    <p className="font-semibold text-ink">{filter.name}</p>
+                    <p className="mt-1 text-sm text-slate/70">{filter.type} • {filter.field}</p>
+                  </button>
+                ))
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate/70">
+                  No dashboard filters yet. Add one so viewers can slice all relevant widgets together.
+                </div>
+              )}
+            </div>
+          </div>
+
           <Button tone="ghost" onClick={addNoteWidget}>
             Add Note Widget
           </Button>
@@ -246,6 +359,15 @@ export function DashboardBuilderPage() {
             </div>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate/70">{widgets.length} widgets</span>
           </div>
+          {filters.length ? (
+            <div className="flex flex-wrap gap-2 border-b border-slate-100 bg-slate-50 px-5 py-4">
+              {filters.map((filter) => (
+                <span key={filter.id} className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700">
+                  {filter.name}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {widgets.length ? (
             <div className="rounded-b-[28px] bg-slate-50 p-4">
               <GridLayout
@@ -308,64 +430,175 @@ export function DashboardBuilderPage() {
           )}
         </Panel>
 
-        <Panel className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Widget Inspector</p>
-              <h3 className="font-display text-2xl text-ink">{selectedWidget?.title || 'Select a widget'}</h3>
+        <div className="space-y-5">
+          <Panel className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Widget Inspector</p>
+                <h3 className="font-display text-2xl text-ink">{selectedWidget?.title || 'Select a widget'}</h3>
+              </div>
+              {selectedWidget ? (
+                <Button
+                  tone="danger"
+                  onClick={() => {
+                    setWidgets((current) => current.filter((widget) => widget.i !== selectedWidget.i))
+                    setSelectedWidgetId(null)
+                  }}
+                >
+                  Remove
+                </Button>
+              ) : null}
             </div>
+
             {selectedWidget ? (
-              <Button
-                tone="danger"
-                onClick={() => {
-                  setWidgets((current) => current.filter((widget) => widget.i !== selectedWidget.i))
-                  setSelectedWidgetId(null)
-                }}
-              >
-                Remove
-              </Button>
-            ) : null}
-          </div>
-
-          {selectedWidget ? (
-            <>
-              <div>
-                <Label>Widget Title</Label>
-                <Input value={selectedWidget.title} onChange={(event) => updateSelectedWidget({ title: event.target.value })} />
-              </div>
-              <div>
-                <Label>Widget Type</Label>
-                <Select value={selectedWidget.widgetType} disabled>
-                  <option value={selectedWidget.widgetType}>{selectedWidget.widgetType}</option>
-                </Select>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
+              <>
                 <div>
-                  <Label>Width</Label>
-                  <Input type="number" min={2} max={12} value={String(selectedWidget.w)} onChange={(event) => updateSelectedWidget({ w: Number(event.target.value || selectedWidget.w) })} />
+                  <Label>Widget Title</Label>
+                  <Input value={selectedWidget.title} onChange={(event) => updateSelectedWidget({ title: event.target.value })} />
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <Label>Width</Label>
+                    <Input type="number" min={2} max={12} value={String(selectedWidget.w)} onChange={(event) => updateSelectedWidget({ w: Number(event.target.value || selectedWidget.w) })} />
+                  </div>
+                  <div>
+                    <Label>Height</Label>
+                    <Input type="number" min={4} max={16} value={String(selectedWidget.h)} onChange={(event) => updateSelectedWidget({ h: Number(event.target.value || selectedWidget.h) })} />
+                  </div>
+                </div>
+
+                {selectedWidget.widgetType === 'chart' ? (
+                  <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate/75">
+                    <p className="font-semibold text-ink">Linked Chart</p>
+                    <p className="mt-2 leading-6">{chartById.get(selectedWidget.chartId ?? '')?.name || 'This chart is missing or was removed from the library.'}</p>
+                  </div>
+                ) : (
+                  <div>
+                    <Label>Note Text</Label>
+                    <Textarea rows={8} value={selectedWidget.noteText ?? ''} onChange={(event) => updateSelectedWidget({ noteText: event.target.value })} />
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-slate/70">Click a tile in the canvas to rename it, resize it, or remove it before saving the dashboard.</p>
+            )}
+          </Panel>
+
+          <Panel className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Filter Inspector</p>
+                <h3 className="font-display text-2xl text-ink">{selectedFilter?.name || 'Select a filter'}</h3>
+              </div>
+              {selectedFilter ? (
+                <Button
+                  tone="danger"
+                  onClick={() => {
+                    setFilters((current) => current.filter((filter) => filter.id !== selectedFilter.id))
+                    setSelectedFilterId(null)
+                  }}
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </div>
+
+            {selectedFilter ? (
+              <>
+                <div>
+                  <Label>Filter Name</Label>
+                  <Input value={selectedFilter.name} onChange={(event) => updateSelectedFilter({ name: event.target.value })} />
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <Label>Filter Type</Label>
+                    <Select
+                      value={selectedFilter.type}
+                      onChange={(event) =>
+                        updateSelectedFilter({
+                          type: event.target.value as DashboardFilterState['type'],
+                        })
+                      }
+                    >
+                      <option value="date_range">date_range</option>
+                      <option value="dropdown">dropdown</option>
+                      <option value="metric">metric</option>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Applies To</Label>
+                    <Select value={selectedFilter.appliesTo} onChange={(event) => updateSelectedFilter({ appliesTo: event.target.value })}>
+                      <option value="all">all widgets</option>
+                      {widgets
+                        .filter((widget) => widget.widgetType === 'chart' && widget.chartId)
+                        .map((widget) => (
+                          <option key={widget.i} value={widget.chartId}>
+                            {widget.title}
+                          </option>
+                        ))}
+                    </Select>
+                  </div>
                 </div>
                 <div>
-                  <Label>Height</Label>
-                  <Input type="number" min={4} max={16} value={String(selectedWidget.h)} onChange={(event) => updateSelectedWidget({ h: Number(event.target.value || selectedWidget.h) })} />
+                  <Label>Field Name</Label>
+                  <Input value={selectedFilter.field} onChange={(event) => updateSelectedFilter({ field: event.target.value })} placeholder="dimension or order_date" />
                 </div>
-              </div>
 
-              {selectedWidget.widgetType === 'chart' ? (
+                {selectedFilter.type === 'dropdown' ? (
+                  <>
+                    <div>
+                      <Label>Dropdown Options</Label>
+                      <Input value={selectedFilter.optionsText} onChange={(event) => updateSelectedFilter({ optionsText: event.target.value })} placeholder="West, East, North, South" />
+                    </div>
+                    <div>
+                      <Label>Default Value</Label>
+                      <Input value={selectedFilter.defaultValue} onChange={(event) => updateSelectedFilter({ defaultValue: event.target.value })} placeholder="West" />
+                    </div>
+                  </>
+                ) : null}
+
+                {selectedFilter.type === 'metric' ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <Label>Operator</Label>
+                      <Select value={selectedFilter.operator} onChange={(event) => updateSelectedFilter({ operator: event.target.value as DashboardFilterState['operator'] })}>
+                        <option value=">=">{'>='}</option>
+                        <option value=">">{'>'}</option>
+                        <option value="=">{'='}</option>
+                        <option value="<=">{'<='}</option>
+                        <option value="<">{'<'}</option>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Default Threshold</Label>
+                      <Input value={selectedFilter.defaultValue} onChange={(event) => updateSelectedFilter({ defaultValue: event.target.value })} placeholder="1000" />
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedFilter.type === 'date_range' ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <Label>Default Start</Label>
+                      <Input type="date" value={selectedFilter.defaultStart} onChange={(event) => updateSelectedFilter({ defaultStart: event.target.value })} />
+                    </div>
+                    <div>
+                      <Label>Default End</Label>
+                      <Input type="date" value={selectedFilter.defaultEnd} onChange={(event) => updateSelectedFilter({ defaultEnd: event.target.value })} />
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate/75">
-                  <p className="font-semibold text-ink">Linked Chart</p>
-                  <p className="mt-2 leading-6">{chartById.get(selectedWidget.chartId ?? '')?.name || 'This chart is missing or was removed from the library.'}</p>
+                  <p className="font-semibold text-ink">Authoring Tip</p>
+                  <p className="mt-2 leading-6">Use chart output column names like `dimension`, `order_date`, or metric aliases such as `amount_sum` so one dashboard filter can affect multiple widgets consistently.</p>
                 </div>
-              ) : (
-                <div>
-                  <Label>Note Text</Label>
-                  <Textarea rows={8} value={selectedWidget.noteText ?? ''} onChange={(event) => updateSelectedWidget({ noteText: event.target.value })} />
-                </div>
-              )}
-            </>
-          ) : (
-            <p className="text-sm text-slate/70">Click a tile in the canvas to rename it, resize it, or remove it before saving the dashboard.</p>
-          )}
-        </Panel>
+              </>
+            ) : (
+              <p className="text-sm text-slate/70">Add a dashboard filter from the left panel, then configure its field, type, and scope here.</p>
+            )}
+          </Panel>
+        </div>
       </div>
     </div>
   )
