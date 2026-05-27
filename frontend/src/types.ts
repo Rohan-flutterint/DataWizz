@@ -221,6 +221,34 @@ export type DashboardMetrics = {
   }[]
 }
 
+export type SupersetIntegrationStatus = {
+  status: string
+  reachable: boolean
+  checked_url: string
+  http_status?: number
+  detail?: string
+  login: {
+    ui_url: string
+    username: string
+    password: string
+  }
+  sample_connections: {
+    label: string
+    purpose: string
+    sqlalchemy_uri: string
+  }[]
+  sample_datasets: {
+    name: string
+    schema: string
+    description: string
+  }[]
+  setup: {
+    compose_command: string
+    profile: string
+    notes: string[]
+  }
+}
+
 export type QueryResult = {
   columns: string[]
   rows: Record<string, unknown>[]
