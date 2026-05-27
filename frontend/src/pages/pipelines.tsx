@@ -42,7 +42,7 @@ export function PipelineBuilderPage() {
     { id: 'edge_1', source: 'fileSource_1', target: 'sql_2' },
     { id: 'edge_2', source: 'sql_2', target: 'writeDelta_3' },
   ])
-  const [statusMessage, setStatusMessage] = useState('Start by selecting a source asset for the first node, then configure transforms from the side panel.')
+  const [statusMessage, setStatusMessage] = useState('Start from a starter template or build from scratch, then use the node guardrails on the right to tighten joins and aggregates before running.')
   const [dagCode, setDagCode] = useState('')
 
   useEffect(() => {
@@ -154,7 +154,7 @@ export function PipelineBuilderPage() {
         </div>
         <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate/75">
           <p className="font-semibold text-ink">Builder Guidance</p>
-          <p className="mt-2 leading-6">Choose files and Delta tables from the side panel, wire the graph visually, and configure each step with forms instead of raw JSON. The starter pipeline already defines a simple source → transform → publish flow.</p>
+          <p className="mt-2 leading-6">Apply a starter template for SQL curation, join enrichment, or aggregation marts, then wire the graph visually and let the inline guardrails catch missing join mappings, unsupported aggregations, and malformed schedules before a run starts.</p>
         </div>
         <div className="rounded-2xl bg-cyan-50 p-4 text-sm text-lagoon">
           <p className="font-semibold">Current Status</p>

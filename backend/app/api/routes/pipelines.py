@@ -3,6 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.catalog import DeltaTable, UploadedFile
 from app.models.pipeline import JobLog, Pipeline, PipelineRun
 from app.schemas.pipelines import (
     AirflowDagResponse,
@@ -106,7 +107,13 @@ def validate_pipeline(pipeline_id: str, db: Session = Depends(get_db)) -> Pipeli
     record = db.query(Pipeline).filter(Pipeline.id == pipeline_id).one_or_none()
     if record is None:
         raise HTTPException(status_code=404, detail="Pipeline not found")
-    valid, ordered_nodes, issues = pipeline_service.validate_definition(record.definition_json)
+    uploaded_files = {item.id: item for item in db.query(UploadedFile).all()}
+    delta_tables = {item.id: item for item in db.query(DeltaTable).all()}
+    valid, ordered_nodes, issues = pipeline_service.validate_definition(
+        record.definition_json,
+        uploaded_files=uploaded_files,
+        delta_tables=delta_tables,
+    )
     message = "Pipeline is valid" if valid else "Pipeline has validation issues"
     return PipelineValidationResponse(valid=valid, message=message, ordered_nodes=ordered_nodes, issues=issues)
 
