@@ -238,3 +238,28 @@ export type ReportSchedule = {
   created_at: string
   updated_at: string
 }
+
+export type ReportSnapshot = {
+  id: string
+  schedule_id?: string
+  dashboard_id?: string
+  schedule_name: string
+  dashboard_name?: string
+  requested_format: string
+  destination: string
+  status: string
+  artifact_path?: string
+  artifact_file_name?: string
+  artifact_kind?: string
+  error_message?: string
+  summary_json?: Record<string, unknown>
+  started_at?: string
+  finished_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export type ReportScheduleExecution = {
+  schedule: ReportSchedule
+  snapshot: ReportSnapshot
+}

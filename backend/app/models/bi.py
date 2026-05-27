@@ -1,4 +1,6 @@
-from sqlalchemy import ForeignKey, JSON, String, Text
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -55,3 +57,22 @@ class ReportSchedule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     frequency: Mapped[str] = mapped_column(String(32), nullable=False)
     destination: Mapped[str] = mapped_column(String(64), default="local_export", nullable=False)
     config_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class ReportSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "report_snapshots"
+
+    schedule_id: Mapped[str | None] = mapped_column(ForeignKey("report_schedules.id", ondelete="SET NULL"), nullable=True)
+    dashboard_id: Mapped[str | None] = mapped_column(ForeignKey("dashboards.id", ondelete="SET NULL"), nullable=True)
+    schedule_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    dashboard_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    requested_format: Mapped[str] = mapped_column(String(32), nullable=False)
+    destination: Mapped[str] = mapped_column(String(64), nullable=False, default="local_export")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    artifact_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    artifact_file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    artifact_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

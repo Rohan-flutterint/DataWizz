@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 from app.schemas.common import TimestampedModel
@@ -203,6 +205,34 @@ class ReportScheduleRead(TimestampedModel):
 
 class ReportScheduleListResponse(BaseModel):
     items: list[ReportScheduleRead]
+
+
+class ReportSnapshotRead(TimestampedModel):
+    schedule_id: str | None = None
+    dashboard_id: str | None = None
+    schedule_name: str
+    dashboard_name: str | None = None
+    requested_format: str
+    destination: str
+    status: str
+    artifact_path: str | None = None
+    artifact_file_name: str | None = None
+    artifact_kind: str | None = None
+    error_message: str | None = None
+    summary_json: dict | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ReportSnapshotListResponse(BaseModel):
+    items: list[ReportSnapshotRead]
+
+
+class ReportScheduleExecutionResponse(BaseModel):
+    schedule: ReportScheduleRead
+    snapshot: ReportSnapshotRead
 
 
 class ChartPreviewResponse(BaseModel):

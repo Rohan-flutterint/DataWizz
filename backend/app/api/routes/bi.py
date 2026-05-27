@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.bi import Chart, Dashboard, DashboardWidget, ReportSchedule, SemanticDataset
+from app.models.bi import Chart, Dashboard, ReportSchedule, SemanticDataset
 from app.schemas.common import ApiMessage
 from app.schemas.bi import (
     ChartListResponse,
@@ -27,8 +27,10 @@ from app.schemas.bi import (
     DatasetPreviewResponse,
     DatasetExplorerResponse,
     ReportScheduleCreateRequest,
+    ReportScheduleExecutionResponse,
     ReportScheduleListResponse,
     ReportScheduleRead,
+    ReportSnapshotListResponse,
     SemanticDatasetCreateRequest,
     SemanticDatasetRead,
     SemanticDatasetUpdateRequest,
@@ -259,6 +261,22 @@ def create_report_schedule(payload: ReportScheduleCreateRequest, db: Session = D
 def list_report_schedules(db: Session = Depends(get_db)) -> ReportScheduleListResponse:
     items = db.query(ReportSchedule).order_by(ReportSchedule.updated_at.desc()).all()
     return ReportScheduleListResponse(items=items)
+
+
+@router.post("/report-schedules/{schedule_id}/run", response_model=ReportScheduleExecutionResponse)
+def run_report_schedule(schedule_id: str, db: Session = Depends(get_db)) -> ReportScheduleExecutionResponse:
+    record = db.query(ReportSchedule).filter(ReportSchedule.id == schedule_id).one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Report schedule not found")
+    snapshot = bi_service.execute_report_schedule(db, record)
+    db.refresh(record)
+    return ReportScheduleExecutionResponse(schedule=record, snapshot=snapshot)
+
+
+@router.get("/report-snapshots", response_model=ReportSnapshotListResponse)
+def list_report_snapshots(db: Session = Depends(get_db)) -> ReportSnapshotListResponse:
+    items = bi_service.list_report_snapshots(db)
+    return ReportSnapshotListResponse(items=items)
 
 
 @router.delete("/report-schedules/{schedule_id}", response_model=ApiMessage)
