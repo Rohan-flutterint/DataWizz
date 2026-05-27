@@ -5,15 +5,78 @@ import GridLayout from 'react-grid-layout'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import { ChartRenderer } from '../components/chart-renderer'
-import { EmptyState, PageHeader, Panel, Select } from '../components/ui'
+import { Button, EmptyState, Input, PageHeader, Panel, Select } from '../components/ui'
 import { api } from '../lib/api'
 import { formatDate } from '../lib/utils'
+
+type DashboardFilterDefinition = {
+  id: string
+  name: string
+  type: 'date_range' | 'dropdown' | 'metric'
+  field: string
+  appliesTo?: string
+  options?: string[]
+  operator?: '>=' | '>' | '=' | '<=' | '<'
+  defaultValue?: string | null
+  defaultStart?: string | null
+  defaultEnd?: string | null
+}
+
+type DashboardFilterValue = {
+  value?: string
+  start?: string
+  end?: string
+}
+
+function quoteIdentifier(value: string) {
+  return `"${value.replace(/"/g, '""')}"`
+}
+
+function escapeSqlString(value: string) {
+  return value.replace(/'/g, "''")
+}
+
+function applyFiltersToSql(sql: string, filters: DashboardFilterDefinition[], filterValues: Record<string, DashboardFilterValue>, chartId?: string) {
+  const clauses = filters.flatMap((filter) => {
+    if (filter.appliesTo && filter.appliesTo !== 'all' && filter.appliesTo !== chartId) {
+      return []
+    }
+
+    const value = filterValues[filter.id]
+    const field = quoteIdentifier(filter.field)
+
+    if (filter.type === 'dropdown' && value?.value) {
+      return [`${field} = '${escapeSqlString(value.value)}'`]
+    }
+
+    if (filter.type === 'metric' && value?.value) {
+      return [`TRY_CAST(${field} AS DOUBLE) ${filter.operator || '>='} ${Number(value.value) || 0}`]
+    }
+
+    if (filter.type === 'date_range') {
+      const nextClauses: string[] = []
+      if (value?.start) {
+        nextClauses.push(`CAST(${field} AS DATE) >= DATE '${escapeSqlString(value.start)}'`)
+      }
+      if (value?.end) {
+        nextClauses.push(`CAST(${field} AS DATE) <= DATE '${escapeSqlString(value.end)}'`)
+      }
+      return nextClauses
+    }
+
+    return []
+  })
+
+  if (!clauses.length) return sql
+  return `SELECT * FROM (${sql}) AS dashboard_widget WHERE ${clauses.join(' AND ')}`
+}
 
 export function DashboardViewerPage() {
   const [searchParams] = useSearchParams()
   const dashboardsQuery = useQuery({ queryKey: ['bi', 'dashboards'], queryFn: api.listDashboards })
   const chartsQuery = useQuery({ queryKey: ['bi', 'charts'], queryFn: api.listCharts })
   const [selectedDashboardId, setSelectedDashboardId] = useState<string>('')
+  const [filterValues, setFilterValues] = useState<Record<string, DashboardFilterValue>>({})
 
   useEffect(() => {
     const requestedDashboardId = searchParams.get('dashboardId')
@@ -38,13 +101,38 @@ export function DashboardViewerPage() {
     return map
   }, [chartsQuery.data])
 
+  const dashboardFilters = useMemo(
+    () => ((detailQuery.data?.dashboard.filters_json as DashboardFilterDefinition[] | undefined) ?? []).map((filter) => ({ ...filter, appliesTo: filter.appliesTo ?? 'all' })),
+    [detailQuery.data],
+  )
+
+  useEffect(() => {
+    if (!dashboardFilters.length) {
+      setFilterValues({})
+      return
+    }
+
+    setFilterValues((current) => {
+      const next: Record<string, DashboardFilterValue> = {}
+      dashboardFilters.forEach((filter) => {
+        next[filter.id] =
+          current[filter.id] ??
+          (filter.type === 'date_range'
+            ? { start: filter.defaultStart ?? '', end: filter.defaultEnd ?? '' }
+            : { value: filter.defaultValue ?? '' })
+      })
+      return next
+    })
+  }, [dashboardFilters])
+
   const widgetChartQueries = useQueries({
     queries:
       detailQuery.data?.widgets.map((widget) => {
         const chart = widget.chart_id ? chartLookups.get(widget.chart_id) : undefined
+        const filteredSql = chart?.query_sql ? applyFiltersToSql(chart.query_sql, dashboardFilters, filterValues, widget.chart_id ?? undefined) : 'SELECT 1 AS value'
         return {
-          queryKey: ['bi', 'charts', widget.id, 'preview'],
-          queryFn: () => api.previewChart({ sql: chart?.query_sql ?? 'SELECT 1 AS value', limit: 100 }),
+          queryKey: ['bi', 'charts', widget.id, 'preview', filteredSql],
+          queryFn: () => api.previewChart({ sql: filteredSql, limit: 100 }),
           enabled: widget.widget_type === 'chart' && Boolean(chart?.query_sql),
         }
       }) ?? [],
@@ -59,12 +147,23 @@ export function DashboardViewerPage() {
       h: widget.layout_json.h,
     })) ?? []
 
+  const resetFilters = () => {
+    const next: Record<string, DashboardFilterValue> = {}
+    dashboardFilters.forEach((filter) => {
+      next[filter.id] =
+        filter.type === 'date_range'
+          ? { start: filter.defaultStart ?? '', end: filter.defaultEnd ?? '' }
+          : { value: filter.defaultValue ?? '' }
+    })
+    setFilterValues(next)
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Dashboard Consumption"
         title="Dashboard Viewer"
-        description="Open saved dashboards, hydrate their saved chart widgets, and review the final BI presentation layer with layout and narrative notes intact."
+        description="Open saved dashboards, apply shared dashboard-level filters, and review the final BI presentation layer with chart widgets and narrative notes."
       />
 
       <Panel className="max-w-md">
@@ -99,6 +198,83 @@ export function DashboardViewerPage() {
               </div>
             </div>
           </Panel>
+
+          {dashboardFilters.length ? (
+            <Panel className="space-y-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Dashboard Filters</p>
+                  <h3 className="mt-2 font-display text-2xl text-ink">Shared Controls</h3>
+                </div>
+                <Button tone="ghost" onClick={resetFilters}>
+                  Reset Filters
+                </Button>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-3">
+                {dashboardFilters.map((filter) => (
+                  <div key={filter.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate/50">{filter.name}</p>
+                    <p className="mt-1 text-sm text-slate/70">{filter.field} • {filter.type}</p>
+
+                    {filter.type === 'dropdown' ? (
+                      <Select
+                        className="mt-3"
+                        value={filterValues[filter.id]?.value ?? ''}
+                        onChange={(event) => setFilterValues((current) => ({ ...current, [filter.id]: { value: event.target.value } }))}
+                      >
+                        <option value="">All values</option>
+                        {(filter.options ?? []).map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : null}
+
+                    {filter.type === 'metric' ? (
+                      <div className="mt-3 space-y-2">
+                        <div className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-600">
+                          {filter.operator || '>='} {filter.field}
+                        </div>
+                        <Input
+                          type="number"
+                          value={filterValues[filter.id]?.value ?? ''}
+                          onChange={(event) => setFilterValues((current) => ({ ...current, [filter.id]: { value: event.target.value } }))}
+                          placeholder="Enter threshold"
+                        />
+                      </div>
+                    ) : null}
+
+                    {filter.type === 'date_range' ? (
+                      <div className="mt-3 grid gap-3">
+                        <Input
+                          type="date"
+                          value={filterValues[filter.id]?.start ?? ''}
+                          onChange={(event) =>
+                            setFilterValues((current) => ({
+                              ...current,
+                              [filter.id]: { ...current[filter.id], start: event.target.value },
+                            }))
+                          }
+                        />
+                        <Input
+                          type="date"
+                          value={filterValues[filter.id]?.end ?? ''}
+                          onChange={(event) =>
+                            setFilterValues((current) => ({
+                              ...current,
+                              [filter.id]: { ...current[filter.id], end: event.target.value },
+                            }))
+                          }
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          ) : null}
 
           {detailQuery.data.widgets.length ? (
             <Panel className="p-0">
