@@ -67,13 +67,20 @@ class PipelineService:
         db.refresh(log)
         return log
 
-    def execute_pipeline(self, db: Session, pipeline: Pipeline) -> PipelineRun:
+    def execute_pipeline(
+        self,
+        db: Session,
+        pipeline: Pipeline,
+        *,
+        trigger_type: str = "manual",
+        retry_of_run_id: str | None = None,
+    ) -> PipelineRun:
         valid, ordered_nodes, issues = self.validate_definition(pipeline.definition_json)
         run = PipelineRun(
             pipeline_id=pipeline.id,
             status="pending",
             started_at=datetime.now(timezone.utc),
-            trigger_type="manual",
+            trigger_type=trigger_type,
         )
         db.add(run)
         db.commit()
@@ -83,6 +90,7 @@ class PipelineService:
             run.status = "failed"
             run.error_message = "; ".join(issues)
             run.finished_at = datetime.now(timezone.utc)
+            run.run_summary = {"ordered_nodes": ordered_nodes, "issues": issues, "retry_of_run_id": retry_of_run_id}
             db.commit()
             self.create_log(db, run_id=run.id, level="ERROR", source="pipeline", message=run.error_message, status="failed")
             return run
@@ -250,7 +258,11 @@ class PipelineService:
             run.status = "success"
             run.finished_at = datetime.now(timezone.utc)
             run.duration_ms = int((perf_counter() - started) * 1000)
-            run.run_summary = {"ordered_nodes": ordered_nodes, "completed_nodes": list(view_names.keys())}
+            run.run_summary = {
+                "ordered_nodes": ordered_nodes,
+                "completed_nodes": list(view_names.keys()),
+                "retry_of_run_id": retry_of_run_id,
+            }
             db.commit()
             return run
         except Exception as exc:
@@ -258,6 +270,11 @@ class PipelineService:
             run.error_message = str(exc)
             run.finished_at = datetime.now(timezone.utc)
             run.duration_ms = int((perf_counter() - started) * 1000)
+            run.run_summary = {
+                "ordered_nodes": ordered_nodes,
+                "completed_nodes": list(view_names.keys()),
+                "retry_of_run_id": retry_of_run_id,
+            }
             db.commit()
             self.create_log(
                 db,

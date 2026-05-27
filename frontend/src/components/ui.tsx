@@ -1,5 +1,6 @@
 import type {
   ButtonHTMLAttributes,
+  HTMLAttributes,
   InputHTMLAttributes,
   PropsWithChildren,
   ReactNode,
@@ -38,9 +39,10 @@ export function PageHeader({
 export function Panel({
   children,
   className,
-}: PropsWithChildren<{ className?: string }>) {
+  ...props
+}: PropsWithChildren<{ className?: string } & HTMLAttributes<HTMLDivElement>>) {
   return (
-    <div className={cn('rounded-xl border border-slate-200 bg-white p-5 shadow-sm', className)}>
+    <div {...props} className={cn('rounded-xl border border-slate-200 bg-white p-5 shadow-sm', className)}>
       {children}
     </div>
   )

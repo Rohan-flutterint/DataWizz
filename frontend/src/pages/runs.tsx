@@ -1,17 +1,30 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { StatusBadge } from '../components/status-badge'
-import { EmptyState, PageHeader, Panel } from '../components/ui'
+import { Button, EmptyState, PageHeader, Panel } from '../components/ui'
 import { api } from '../lib/api'
 import { formatDate } from '../lib/utils'
 
 export function PipelineRunsPage() {
+  const queryClient = useQueryClient()
   const runsQuery = useQuery({ queryKey: ['runs'], queryFn: api.listRuns })
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState('Select a run to inspect details, diagnose failures, and retry a pipeline without returning to the builder.')
   const detailQuery = useQuery({
     queryKey: ['runs', selectedRunId],
     queryFn: () => api.getRunDetails(selectedRunId!),
     enabled: Boolean(selectedRunId),
+  })
+  const retryMutation = useMutation({
+    mutationFn: api.retryPipelineRun,
+    onSuccess: ({ run }) => {
+      queryClient.invalidateQueries({ queryKey: ['runs'] })
+      setSelectedRunId(run.id)
+      setStatusMessage(`Started retry for pipeline run ${run.id}.`)
+    },
+    onError: (error: Error) => {
+      setStatusMessage(error.message)
+    },
   })
 
   useEffect(() => {
@@ -35,6 +48,11 @@ export function PipelineRunsPage() {
         title="Pipeline Runs"
         description="Track pipeline execution status, inspect exact failure causes, and review per-step logs for every manual run across the lakehouse."
       />
+
+      <Panel className="rounded-2xl bg-cyan-50 p-4 text-sm text-lagoon">
+        <p className="font-semibold">Runs Status</p>
+        <p className="mt-2 leading-6">{statusMessage}</p>
+      </Panel>
 
       {runs.length ? (
         <div className="grid gap-5 xl:grid-cols-[1.1fr_minmax(0,0.9fr)]">
@@ -97,7 +115,16 @@ export function PipelineRunsPage() {
                       <h2 className="mt-2 font-display text-3xl text-ink">{detailQuery.data.pipeline?.name || detailQuery.data.run.pipeline_name || 'Pipeline Run'}</h2>
                       <p className="mt-2 text-sm text-slate/70">Run {detailQuery.data.run.id}</p>
                     </div>
-                    <StatusBadge status={detailQuery.data.run.status} />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge status={detailQuery.data.run.status} />
+                      <Button
+                        tone="ghost"
+                        disabled={retryMutation.isPending}
+                        onClick={() => retryMutation.mutate(detailQuery.data!.run.id)}
+                      >
+                        {retryMutation.isPending ? 'Retrying...' : 'Retry Run'}
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2">
