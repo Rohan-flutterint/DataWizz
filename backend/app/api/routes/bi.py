@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.bi import Chart, Dashboard, DashboardWidget, ReportSchedule, SemanticDataset
+from app.schemas.common import ApiMessage
 from app.schemas.bi import (
     ChartListResponse,
     ChartCreateRequest,
@@ -83,6 +84,16 @@ def create_chart(payload: ChartCreateRequest, db: Session = Depends(get_db)) -> 
     return record
 
 
+@router.delete("/charts/{chart_id}", response_model=ApiMessage)
+def delete_chart(chart_id: str, db: Session = Depends(get_db)) -> ApiMessage:
+    record = db.query(Chart).filter(Chart.id == chart_id).one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Chart not found")
+    db.delete(record)
+    db.commit()
+    return ApiMessage(message="Chart deleted successfully")
+
+
 @router.post("/charts/preview", response_model=ChartPreviewResponse)
 def preview_chart(payload: dict, db: Session = Depends(get_db)) -> ChartPreviewResponse:
     sql = payload.get("sql")
@@ -101,13 +112,17 @@ def list_dashboards(db: Session = Depends(get_db)) -> DashboardListResponse:
 @router.post("/dashboards", response_model=DashboardDetailResponse)
 def create_dashboard(payload: DashboardCreateRequest, db: Session = Depends(get_db)) -> DashboardDetailResponse:
     dashboard = Dashboard(
-        name=payload.name,
+        name=bi_service.resolve_dashboard_name(db, payload.name),
         description=payload.description,
         layout_json=payload.layout_json,
         filters_json=payload.filters_json,
     )
     db.add(dashboard)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A dashboard with this name already exists. Please try again.") from exc
     db.refresh(dashboard)
     widgets = bi_service.replace_dashboard_widgets(db, dashboard, [item.model_dump() for item in payload.widgets])
     return DashboardDetailResponse(dashboard=dashboard, widgets=widgets)
