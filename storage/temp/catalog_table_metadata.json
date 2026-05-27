@@ -1,0 +1,11 @@
+{
+  "9bb76026-0cd1-495e-925c-f5d07be37e78": {
+    "owner": "finance_analytics",
+    "tags": [
+      "finance",
+      "gold"
+    ],
+    "lineage_hint": "Joined from finance marts",
+    "freshness_status": "fresh"
+  }
+}

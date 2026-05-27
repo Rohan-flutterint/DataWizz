@@ -22,6 +22,10 @@ export type DeltaTable = {
   source_query?: string
   row_count?: number
   last_refreshed_at?: string
+  owner?: string
+  tags?: string[]
+  freshness_status?: string
+  lineage_hint?: string
   created_at: string
   updated_at: string
 }
