@@ -479,8 +479,9 @@ export function DashboardBuilderPage() {
                             chartType={chart?.chart_type ?? 'bar'}
                             rows={preview?.rows ?? []}
                             title={widget.title}
-                            categoryKey={chart?.chart_type === 'kpi' ? undefined : String(config.dimensionKey ?? preview?.columns?.[0] ?? '')}
+                            categoryKey={chart?.chart_type === 'kpi' ? undefined : String(preview?.columns?.[0] ?? '')}
                             valueKey={String(config.metricAlias ?? preview?.columns?.[1] ?? '')}
+                            config={config}
                           />
                         </div>
                       ) : (

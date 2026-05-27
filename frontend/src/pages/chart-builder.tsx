@@ -71,6 +71,7 @@ function buildChartSql({
   metric,
   rowLimit,
   sortDirection,
+  sortBy,
 }: {
   sourceRef: string
   chartType: string
@@ -78,6 +79,7 @@ function buildChartSql({
   metric: MetricOption
   rowLimit: number
   sortDirection: 'asc' | 'desc'
+  sortBy: 'value' | 'dimension'
 }) {
   const safeSource = quoteIdentifier(sourceRef)
   const safeLimit = Number.isFinite(rowLimit) && rowLimit > 0 ? rowLimit : 10
@@ -87,7 +89,7 @@ function buildChartSql({
   }
 
   const dimensionExpr = dimension ? quoteIdentifier(dimension) : quoteIdentifier('category')
-  const orderBy = chartType === 'timeseries' ? '1 ASC' : `2 ${sortDirection.toUpperCase()}`
+  const orderBy = chartType === 'timeseries' ? '1 ASC' : sortBy === 'dimension' ? `1 ${sortDirection.toUpperCase()}` : `2 ${sortDirection.toUpperCase()}`
 
   return `SELECT ${dimensionExpr} AS "dimension", ${metric.expression} AS ${quoteIdentifier(metric.alias)}\nFROM ${safeSource}\nGROUP BY 1\nORDER BY ${orderBy}\nLIMIT ${safeLimit}`
 }
@@ -102,7 +104,17 @@ export function ChartBuilderPage() {
   const [dimensionKey, setDimensionKey] = useState('')
   const [metricKey, setMetricKey] = useState('')
   const [rowLimit, setRowLimit] = useState('12')
+  const [sortBy, setSortBy] = useState<'value' | 'dimension'>('value')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
+  const [xAxisLabel, setXAxisLabel] = useState('')
+  const [yAxisLabel, setYAxisLabel] = useState('')
+  const [color, setColor] = useState('#0b7285')
+  const [fillColor, setFillColor] = useState('#d9f0f2')
+  const [numberFormat, setNumberFormat] = useState<'number' | 'currency' | 'percent' | 'compact' | 'integer'>('number')
+  const [showLegend, setShowLegend] = useState(false)
+  const [kpiSubtitle, setKpiSubtitle] = useState('')
+  const [kpiThresholdValue, setKpiThresholdValue] = useState('')
+  const [kpiThresholdDirection, setKpiThresholdDirection] = useState<'>=' | '<='>('>=')
   const [sql, setSql] = useState('')
   const [statusMessage, setStatusMessage] = useState('Choose a semantic dataset, pick a dimension and metric, then generate a chart query.')
 
@@ -150,6 +162,19 @@ export function ChartBuilderPage() {
     setName((current) => (current.trim() ? current : defaultName))
   }, [chartType, dimensionKey, selectedDataset, selectedMetric])
 
+  useEffect(() => {
+    if (!selectedMetric) return
+    if (chartType === 'kpi') {
+      setKpiSubtitle((current) => current || selectedMetric.label)
+    }
+    if (!yAxisLabel && chartType !== 'kpi') {
+      setYAxisLabel(selectedMetric.alias)
+    }
+    if (!xAxisLabel && dimensionKey && chartType !== 'kpi') {
+      setXAxisLabel(dimensionKey)
+    }
+  }, [chartType, dimensionKey, selectedMetric, xAxisLabel, yAxisLabel])
+
   const previewMutation = useMutation({
     mutationFn: api.previewChart,
     onSuccess: (data) => {
@@ -191,6 +216,7 @@ export function ChartBuilderPage() {
       metric: selectedMetric,
       rowLimit: Number(rowLimit),
       sortDirection,
+      sortBy,
     })
     setSql(nextSql)
     setStatusMessage(`Generated SQL for ${selectedDataset.name}. You can preview it or keep editing manually.`)
@@ -218,8 +244,18 @@ export function ChartBuilderPage() {
         dimensionKey: chartType === 'kpi' ? null : dimensionKey,
         metricKey,
         metricAlias: selectedMetric?.alias,
+        sortBy,
         sortDirection,
         rowLimit: Number(rowLimit),
+        xAxisLabel: chartType === 'kpi' ? null : xAxisLabel || dimensionKey,
+        yAxisLabel: chartType === 'kpi' ? null : yAxisLabel || selectedMetric?.alias,
+        color,
+        fillColor,
+        numberFormat,
+        showLegend,
+        kpiSubtitle: chartType === 'kpi' ? kpiSubtitle || selectedMetric?.label : null,
+        kpiThresholdValue: chartType === 'kpi' && kpiThresholdValue ? Number(kpiThresholdValue) : null,
+        kpiThresholdDirection: chartType === 'kpi' ? kpiThresholdDirection : null,
       },
     })
   }
@@ -315,6 +351,13 @@ export function ChartBuilderPage() {
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
                   <div>
+                    <Label>Sort By</Label>
+                    <Select value={sortBy} onChange={(event) => setSortBy(event.target.value as 'value' | 'dimension')} disabled={chartType === 'timeseries' || chartType === 'kpi'}>
+                      <option value="value">value</option>
+                      <option value="dimension">dimension</option>
+                    </Select>
+                  </div>
+                  <div>
                     <Label>Sort</Label>
                     <Select value={sortDirection} onChange={(event) => setSortDirection(event.target.value as 'asc' | 'desc')} disabled={chartType === 'timeseries' || chartType === 'kpi'}>
                       <option value="desc">desc</option>
@@ -326,6 +369,65 @@ export function ChartBuilderPage() {
                     <Input value={rowLimit} onChange={(event) => setRowLimit(event.target.value)} type="number" min={1} />
                   </div>
                 </div>
+              </div>
+
+              <div className="grid gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">
+                <div className="md:col-span-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Chart Customization</p>
+                  <p className="mt-2 text-sm leading-6 text-slate/70">Fine-tune how the saved chart looks across the chart library, dashboard canvas, and published dashboard viewer.</p>
+                </div>
+                <div>
+                  <Label>X Axis Label</Label>
+                  <Input value={xAxisLabel} onChange={(event) => setXAxisLabel(event.target.value)} placeholder="Region" disabled={chartType === 'kpi' || chartType === 'pie' || chartType === 'donut'} />
+                </div>
+                <div>
+                  <Label>Y Axis Label</Label>
+                  <Input value={yAxisLabel} onChange={(event) => setYAxisLabel(event.target.value)} placeholder="Revenue" disabled={chartType === 'kpi' || chartType === 'pie' || chartType === 'donut'} />
+                </div>
+                <div>
+                  <Label>Series Color</Label>
+                  <Input type="color" value={color} onChange={(event) => setColor(event.target.value)} className="h-11 p-2" />
+                </div>
+                <div>
+                  <Label>Area Fill</Label>
+                  <Input type="color" value={fillColor} onChange={(event) => setFillColor(event.target.value)} className="h-11 p-2" disabled={chartType !== 'area'} />
+                </div>
+                <div>
+                  <Label>Number Format</Label>
+                  <Select value={numberFormat} onChange={(event) => setNumberFormat(event.target.value as 'number' | 'currency' | 'percent' | 'compact' | 'integer')}>
+                    <option value="number">number</option>
+                    <option value="currency">currency</option>
+                    <option value="percent">percent</option>
+                    <option value="compact">compact</option>
+                    <option value="integer">integer</option>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Legend</Label>
+                  <Select value={showLegend ? 'show' : 'hide'} onChange={(event) => setShowLegend(event.target.value === 'show')} disabled={chartType === 'kpi'}>
+                    <option value="hide">hide</option>
+                    <option value="show">show</option>
+                  </Select>
+                </div>
+                {chartType === 'kpi' ? (
+                  <>
+                    <div className="md:col-span-2">
+                      <Label>KPI Subtitle</Label>
+                      <Input value={kpiSubtitle} onChange={(event) => setKpiSubtitle(event.target.value)} placeholder="Monthly recurring revenue" />
+                    </div>
+                    <div>
+                      <Label>Threshold Direction</Label>
+                      <Select value={kpiThresholdDirection} onChange={(event) => setKpiThresholdDirection(event.target.value as '>=' | '<=')}>
+                        <option value=">=">{'>='}</option>
+                        <option value="<=">{'<='}</option>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Threshold Value</Label>
+                      <Input value={kpiThresholdValue} onChange={(event) => setKpiThresholdValue(event.target.value)} type="number" placeholder="1000" />
+                    </div>
+                  </>
+                ) : null}
               </div>
 
               <div className="flex flex-wrap gap-3">
@@ -422,6 +524,19 @@ export function ChartBuilderPage() {
               title={name}
               categoryKey={chartType === 'kpi' ? undefined : previewColumns[0]}
               valueKey={previewValueKey}
+              config={{
+                dimensionKey: chartType === 'kpi' ? null : previewColumns[0],
+                metricAlias: previewValueKey,
+                xAxisLabel,
+                yAxisLabel,
+                color,
+                fillColor,
+                numberFormat,
+                showLegend,
+                kpiSubtitle,
+                kpiThresholdValue: kpiThresholdValue ? Number(kpiThresholdValue) : null,
+                kpiThresholdDirection,
+              }}
             />
           </div>
         </div>

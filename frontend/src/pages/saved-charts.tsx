@@ -23,7 +23,17 @@ export function SavedChartsPage() {
   const [editDimensionKey, setEditDimensionKey] = useState('')
   const [editMetricAlias, setEditMetricAlias] = useState('')
   const [editRowLimit, setEditRowLimit] = useState('')
+  const [editSortBy, setEditSortBy] = useState('value')
   const [editSortDirection, setEditSortDirection] = useState('desc')
+  const [editXAxisLabel, setEditXAxisLabel] = useState('')
+  const [editYAxisLabel, setEditYAxisLabel] = useState('')
+  const [editColor, setEditColor] = useState('#0b7285')
+  const [editFillColor, setEditFillColor] = useState('#d9f0f2')
+  const [editNumberFormat, setEditNumberFormat] = useState('number')
+  const [editLegendMode, setEditLegendMode] = useState('hide')
+  const [editKpiSubtitle, setEditKpiSubtitle] = useState('')
+  const [editKpiThresholdValue, setEditKpiThresholdValue] = useState('')
+  const [editKpiThresholdDirection, setEditKpiThresholdDirection] = useState('>=')
 
   const charts = chartsQuery.data?.items ?? []
   const datasetNameById = new Map((datasetsQuery.data?.items ?? []).map((dataset) => [dataset.id, dataset.name]))
@@ -83,7 +93,17 @@ export function SavedChartsPage() {
     setEditDimensionKey(String(config.dimensionKey ?? ''))
     setEditMetricAlias(String(config.metricAlias ?? ''))
     setEditRowLimit(String(config.rowLimit ?? ''))
+    setEditSortBy(String(config.sortBy ?? 'value'))
     setEditSortDirection(String(config.sortDirection ?? 'desc'))
+    setEditXAxisLabel(String(config.xAxisLabel ?? ''))
+    setEditYAxisLabel(String(config.yAxisLabel ?? ''))
+    setEditColor(String(config.color ?? '#0b7285'))
+    setEditFillColor(String(config.fillColor ?? '#d9f0f2'))
+    setEditNumberFormat(String(config.numberFormat ?? 'number'))
+    setEditLegendMode(Boolean(config.showLegend ?? false) ? 'show' : 'hide')
+    setEditKpiSubtitle(String(config.kpiSubtitle ?? ''))
+    setEditKpiThresholdValue(String(config.kpiThresholdValue ?? ''))
+    setEditKpiThresholdDirection(String(config.kpiThresholdDirection ?? '>='))
   }, [selectedChart])
 
   const deleteMutation = useMutation({
@@ -208,7 +228,17 @@ export function SavedChartsPage() {
                             dimensionKey: editDimensionKey || null,
                             metricAlias: editMetricAlias || null,
                             rowLimit: editRowLimit ? Number(editRowLimit) : null,
+                            sortBy: editSortBy,
                             sortDirection: editSortDirection,
+                            xAxisLabel: editXAxisLabel || null,
+                            yAxisLabel: editYAxisLabel || null,
+                            color: editColor,
+                            fillColor: editFillColor,
+                            numberFormat: editNumberFormat,
+                            showLegend: editLegendMode === 'show',
+                            kpiSubtitle: editKpiSubtitle || null,
+                            kpiThresholdValue: editKpiThresholdValue ? Number(editKpiThresholdValue) : null,
+                            kpiThresholdDirection: editKpiThresholdDirection,
                             datasetName: editDatasetId ? datasetNameById.get(editDatasetId) : undefined,
                           },
                         },
@@ -245,6 +275,11 @@ export function SavedChartsPage() {
                     {selectedConfig.rowLimit ? (
                       <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700">
                         Limit: {String(selectedConfig.rowLimit)}
+                      </span>
+                    ) : null}
+                    {selectedConfig.numberFormat ? (
+                      <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                        Format: {String(selectedConfig.numberFormat)}
                       </span>
                     ) : null}
                     {selectedConfig.sortDirection ? (
@@ -301,6 +336,65 @@ export function SavedChartsPage() {
                         <option value="asc">asc</option>
                       </Select>
                     </div>
+                    <div>
+                      <Label>Sort By</Label>
+                      <Select value={editSortBy} onChange={(event) => setEditSortBy(event.target.value)}>
+                        <option value="value">value</option>
+                        <option value="dimension">dimension</option>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Number Format</Label>
+                      <Select value={editNumberFormat} onChange={(event) => setEditNumberFormat(event.target.value)}>
+                        <option value="number">number</option>
+                        <option value="currency">currency</option>
+                        <option value="percent">percent</option>
+                        <option value="compact">compact</option>
+                        <option value="integer">integer</option>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>X Axis Label</Label>
+                      <Input value={editXAxisLabel} onChange={(event) => setEditXAxisLabel(event.target.value)} />
+                    </div>
+                    <div>
+                      <Label>Y Axis Label</Label>
+                      <Input value={editYAxisLabel} onChange={(event) => setEditYAxisLabel(event.target.value)} />
+                    </div>
+                    <div>
+                      <Label>Series Color</Label>
+                      <Input type="color" value={editColor} onChange={(event) => setEditColor(event.target.value)} className="h-11 p-2" />
+                    </div>
+                    <div>
+                      <Label>Area Fill</Label>
+                      <Input type="color" value={editFillColor} onChange={(event) => setEditFillColor(event.target.value)} className="h-11 p-2" disabled={editChartType !== 'area'} />
+                    </div>
+                    <div>
+                      <Label>Legend</Label>
+                      <Select value={editLegendMode} onChange={(event) => setEditLegendMode(event.target.value)}>
+                        <option value="hide">hide</option>
+                        <option value="show">show</option>
+                      </Select>
+                    </div>
+                    {editChartType === 'kpi' ? (
+                      <>
+                        <div className="md:col-span-2">
+                          <Label>KPI Subtitle</Label>
+                          <Input value={editKpiSubtitle} onChange={(event) => setEditKpiSubtitle(event.target.value)} />
+                        </div>
+                        <div>
+                          <Label>Threshold Direction</Label>
+                          <Select value={editKpiThresholdDirection} onChange={(event) => setEditKpiThresholdDirection(event.target.value)}>
+                            <option value=">=">{'>='}</option>
+                            <option value="<=">{'<='}</option>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label>Threshold Value</Label>
+                          <Input type="number" value={editKpiThresholdValue} onChange={(event) => setEditKpiThresholdValue(event.target.value)} />
+                        </div>
+                      </>
+                    ) : null}
                     <div className="md:col-span-2">
                       <Label>Chart SQL</Label>
                       <Textarea rows={10} value={editSql} onChange={(event) => setEditSql(event.target.value)} />
@@ -314,8 +408,9 @@ export function SavedChartsPage() {
                       chartType={selectedChart.chart_type}
                       rows={previewQuery.data?.rows ?? []}
                       title={selectedChart.name}
-                      categoryKey={selectedChart.chart_type === 'kpi' ? undefined : String(selectedConfig.dimensionKey ?? previewQuery.data?.columns?.[0] ?? '')}
+                      categoryKey={selectedChart.chart_type === 'kpi' ? undefined : String(previewQuery.data?.columns?.[0] ?? '')}
                       valueKey={String(selectedConfig.metricAlias ?? previewQuery.data?.columns?.[1] ?? '')}
+                      config={selectedConfig}
                     />
                     <Panel className="flex items-center justify-between gap-3">
                       <div>
