@@ -119,6 +119,10 @@ class ReportScheduleRead(TimestampedModel):
     model_config = {"from_attributes": True}
 
 
+class ReportScheduleListResponse(BaseModel):
+    items: list[ReportScheduleRead]
+
+
 class ChartPreviewResponse(BaseModel):
     columns: list[str]
     rows: list[dict]
