@@ -51,8 +51,10 @@ export function DashboardBuilderPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const chartsQuery = useQuery({ queryKey: ['bi', 'charts'], queryFn: api.listCharts })
+  const dashboardsQuery = useQuery({ queryKey: ['bi', 'dashboards'], queryFn: api.listDashboards })
   const [name, setName] = useState('Sales Analytics Dashboard')
   const [description, setDescription] = useState('KPI cards, sales trends, and regional performance for internal stakeholders.')
+  const [editingDashboardId, setEditingDashboardId] = useState('')
   const [chartSearch, setChartSearch] = useState('')
   const [widgets, setWidgets] = useState<WidgetState[]>([])
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null)
@@ -61,6 +63,11 @@ export function DashboardBuilderPage() {
   const [statusMessage, setStatusMessage] = useState('Add saved charts or note widgets to the canvas, then define dashboard-level filters before saving.')
 
   const chartById = useMemo(() => new Map((chartsQuery.data?.items ?? []).map((chart) => [chart.id, chart])), [chartsQuery.data])
+  const dashboardDetailQuery = useQuery({
+    queryKey: ['bi', 'dashboards', 'builder', editingDashboardId],
+    queryFn: () => api.getDashboard(editingDashboardId),
+    enabled: Boolean(editingDashboardId),
+  })
 
   const filteredCharts = useMemo(() => {
     const needle = chartSearch.trim().toLowerCase()
@@ -111,12 +118,59 @@ export function DashboardBuilderPage() {
     }),
   })
 
+  const resetBuilderState = () => {
+    setEditingDashboardId('')
+    setName('Sales Analytics Dashboard')
+    setDescription('KPI cards, sales trends, and regional performance for internal stakeholders.')
+    setWidgets([])
+    setFilters([])
+    setSelectedWidgetId(null)
+    setSelectedFilterId(null)
+    setStatusMessage('Add saved charts or note widgets to the canvas, then define dashboard-level filters before saving.')
+  }
+
+  useEffect(() => {
+    if (!editingDashboardId || !dashboardDetailQuery.data) return
+    setName(dashboardDetailQuery.data.dashboard.name)
+    setDescription(dashboardDetailQuery.data.dashboard.description ?? '')
+    setWidgets(
+      dashboardDetailQuery.data.widgets.map((widget) => ({
+        i: widget.layout_json.i ?? widget.id,
+        x: widget.layout_json.x,
+        y: widget.layout_json.y,
+        w: widget.layout_json.w,
+        h: widget.layout_json.h,
+        title: widget.title,
+        widgetType: widget.widget_type as 'chart' | 'note',
+        chartId: widget.chart_id ?? undefined,
+        noteText: String(widget.config_json.noteText ?? ''),
+      })),
+    )
+    setFilters(
+      (((dashboardDetailQuery.data.dashboard.filters_json as Record<string, unknown>[] | undefined) ?? []).map((filter) => ({
+        id: String(filter.id ?? makeFilterId(1)),
+        name: String(filter.name ?? 'Dashboard Filter'),
+        type: (filter.type as DashboardFilterState['type']) ?? 'dropdown',
+        field: String(filter.field ?? 'dimension'),
+        appliesTo: String(filter.appliesTo ?? 'all'),
+        optionsText: Array.isArray(filter.options) ? filter.options.map((option) => String(option)).join(', ') : '',
+        operator: (filter.operator as DashboardFilterState['operator']) ?? '>=',
+        defaultValue: String(filter.defaultValue ?? ''),
+        defaultStart: String(filter.defaultStart ?? ''),
+        defaultEnd: String(filter.defaultEnd ?? ''),
+      })) as DashboardFilterState[]),
+    )
+    setStatusMessage(`Editing dashboard ${dashboardDetailQuery.data.dashboard.name}.`)
+  }, [dashboardDetailQuery.data, editingDashboardId])
+
   const dashboardMutation = useMutation({
-    mutationFn: api.createDashboard,
+    mutationFn: async (payload: Record<string, unknown>) =>
+      editingDashboardId ? api.updateDashboard(editingDashboardId, payload) : api.createDashboard(payload),
     onSuccess: ({ dashboard }) => {
       queryClient.invalidateQueries({ queryKey: ['bi', 'dashboards'] })
+      setEditingDashboardId(dashboard.id)
       setName(dashboard.name)
-      setStatusMessage(`Saved dashboard ${dashboard.name}.`)
+      setStatusMessage(`${editingDashboardId ? 'Updated' : 'Saved'} dashboard ${dashboard.name}.`)
       navigate(`/bi/dashboards?dashboardId=${encodeURIComponent(dashboard.id)}`)
     },
     onError: (error: Error) => {
@@ -269,6 +323,26 @@ export function DashboardBuilderPage() {
 
       <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)_340px]">
         <Panel className="space-y-5">
+          <div>
+            <Label>Edit Existing Dashboard</Label>
+            <Select
+              value={editingDashboardId}
+              onChange={(event) => {
+                const nextId = event.target.value
+                setEditingDashboardId(nextId)
+                if (!nextId) {
+                  resetBuilderState()
+                }
+              }}
+            >
+              <option value="">New dashboard</option>
+              {dashboardsQuery.data?.items?.map((dashboard) => (
+                <option key={dashboard.id} value={dashboard.id}>
+                  {dashboard.name}
+                </option>
+              ))}
+            </Select>
+          </div>
           <div>
             <Label>Dashboard Name</Label>
             <Input value={name} onChange={(event) => setName(event.target.value)} />

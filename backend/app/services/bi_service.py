@@ -27,27 +27,33 @@ class BiService:
             )
         return datasets
 
-    def resolve_dataset_name(self, db: Session, desired_name: str) -> str:
+    def resolve_dataset_name(self, db: Session, desired_name: str, *, exclude_id: str | None = None) -> str:
         base_name = desired_name.strip() or "Untitled Dataset"
         candidate = base_name
         suffix = 2
 
-        while db.query(SemanticDataset).filter(SemanticDataset.name == candidate).one_or_none() is not None:
+        while True:
+            query = db.query(SemanticDataset).filter(SemanticDataset.name == candidate)
+            if exclude_id is not None:
+                query = query.filter(SemanticDataset.id != exclude_id)
+            if query.one_or_none() is None:
+                return candidate
             candidate = f"{base_name} ({suffix})"
             suffix += 1
 
-        return candidate
-
-    def resolve_dashboard_name(self, db: Session, desired_name: str) -> str:
+    def resolve_dashboard_name(self, db: Session, desired_name: str, *, exclude_id: str | None = None) -> str:
         base_name = desired_name.strip() or "Untitled Dashboard"
         candidate = base_name
         suffix = 2
 
-        while db.query(Dashboard).filter(Dashboard.name == candidate).one_or_none() is not None:
+        while True:
+            query = db.query(Dashboard).filter(Dashboard.name == candidate)
+            if exclude_id is not None:
+                query = query.filter(Dashboard.id != exclude_id)
+            if query.one_or_none() is None:
+                return candidate
             candidate = f"{base_name} ({suffix})"
             suffix += 1
-
-        return candidate
 
     def resolve_report_schedule_name(self, db: Session, desired_name: str) -> str:
         base_name = desired_name.strip() or "Untitled Report Schedule"
