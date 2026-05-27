@@ -1,4 +1,4 @@
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import GridLayout from 'react-grid-layout'
@@ -71,12 +71,22 @@ function applyFiltersToSql(sql: string, filters: DashboardFilterDefinition[], fi
   return `SELECT * FROM (${sql}) AS dashboard_widget WHERE ${clauses.join(' AND ')}`
 }
 
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  link.click()
+  window.URL.revokeObjectURL(url)
+}
+
 export function DashboardViewerPage() {
   const [searchParams] = useSearchParams()
   const dashboardsQuery = useQuery({ queryKey: ['bi', 'dashboards'], queryFn: api.listDashboards })
   const chartsQuery = useQuery({ queryKey: ['bi', 'charts'], queryFn: api.listCharts })
   const [selectedDashboardId, setSelectedDashboardId] = useState<string>('')
   const [filterValues, setFilterValues] = useState<Record<string, DashboardFilterValue>>({})
+  const [exportStatus, setExportStatus] = useState('Select a published dashboard to export its config or generate a demo snapshot artifact.')
 
   useEffect(() => {
     const requestedDashboardId = searchParams.get('dashboardId')
@@ -93,6 +103,28 @@ export function DashboardViewerPage() {
     queryKey: ['bi', 'dashboards', selectedDashboardId],
     queryFn: () => api.getDashboard(selectedDashboardId),
     enabled: Boolean(selectedDashboardId),
+  })
+
+  const exportMutation = useMutation({
+    mutationFn: api.exportDashboard,
+    onSuccess: (blob) => {
+      const safeName = (detailQuery.data?.dashboard.name ?? 'dashboard').trim().toLowerCase().replace(/\s+/g, '_')
+      downloadBlob(blob, `${safeName || 'dashboard'}.dashboard.json`)
+      setExportStatus(`Exported JSON config for ${detailQuery.data?.dashboard.name ?? 'the selected dashboard'}.`)
+    },
+    onError: (error: Error) => {
+      setExportStatus(error.message)
+    },
+  })
+
+  const snapshotMutation = useMutation({
+    mutationFn: async (format: 'pdf' | 'png') => api.createDashboardSnapshot(selectedDashboardId, { format }),
+    onSuccess: (snapshot) => {
+      setExportStatus(`${snapshot.message} Artifact written to ${snapshot.artifact_path}.`)
+    },
+    onError: (error: Error) => {
+      setExportStatus(error.message)
+    },
   })
 
   const chartLookups = useMemo(() => {
@@ -164,17 +196,36 @@ export function DashboardViewerPage() {
         eyebrow="Dashboard Consumption"
         title="Dashboard Viewer"
         description="Open saved dashboards, apply shared dashboard-level filters, and review the final BI presentation layer with chart widgets and narrative notes."
+        actions={
+          <>
+            <Button tone="ghost" disabled={!selectedDashboardId || exportMutation.isPending} onClick={() => exportMutation.mutate(selectedDashboardId)}>
+              {exportMutation.isPending ? 'Exporting...' : 'Export JSON'}
+            </Button>
+            <Button tone="ghost" disabled={!selectedDashboardId || snapshotMutation.isPending} onClick={() => snapshotMutation.mutate('png')}>
+              {snapshotMutation.isPending ? 'Generating...' : 'Mock PNG Snapshot'}
+            </Button>
+            <Button disabled={!selectedDashboardId || snapshotMutation.isPending} onClick={() => snapshotMutation.mutate('pdf')}>
+              {snapshotMutation.isPending ? 'Generating...' : 'Mock PDF Snapshot'}
+            </Button>
+          </>
+        }
       />
 
-      <Panel className="max-w-md">
-        <Select value={selectedDashboardId} onChange={(event) => setSelectedDashboardId(event.target.value)}>
-          <option value="">Select a dashboard</option>
-          {dashboardsQuery.data?.items?.map((dashboard) => (
-            <option key={dashboard.id} value={dashboard.id}>
-              {dashboard.name}
-            </option>
-          ))}
-        </Select>
+      <Panel className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
+        <div>
+          <Select value={selectedDashboardId} onChange={(event) => setSelectedDashboardId(event.target.value)}>
+            <option value="">Select a dashboard</option>
+            {dashboardsQuery.data?.items?.map((dashboard) => (
+              <option key={dashboard.id} value={dashboard.id}>
+                {dashboard.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="rounded-2xl bg-cyan-50 p-4 text-sm text-lagoon">
+          <p className="font-semibold">Export Status</p>
+          <p className="mt-2 leading-6">{exportStatus}</p>
+        </div>
       </Panel>
 
       {detailQuery.data?.dashboard ? (

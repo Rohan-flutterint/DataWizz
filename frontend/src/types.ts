@@ -162,6 +162,50 @@ export type DashboardWidget = {
   updated_at: string
 }
 
+export type DashboardExportChart = {
+  source_chart_id: string
+  name: string
+  chart_type: string
+  dataset_id?: string
+  query_sql: string
+  config_json: Record<string, unknown>
+}
+
+export type DashboardExportWidget = {
+  widget_type: string
+  title: string
+  layout_json: Record<string, unknown>
+  config_json: Record<string, unknown>
+  chart_source_id?: string
+}
+
+export type DashboardExportConfig = {
+  version: string
+  exported_at: string
+  dashboard: {
+    name: string
+    description?: string
+    layout_json: Record<string, unknown>
+    filters_json?: Record<string, unknown>[]
+  }
+  widgets: DashboardExportWidget[]
+  charts: DashboardExportChart[]
+}
+
+export type DashboardImportResult = {
+  dashboard: Dashboard
+  widgets: DashboardWidget[]
+  imported_charts: Chart[]
+}
+
+export type DashboardSnapshot = {
+  message: string
+  requested_format: string
+  dashboard_name: string
+  artifact_path: string
+  artifact_file_name: string
+}
+
 export type DashboardMetrics = {
   total_files: number
   total_delta_tables: number
