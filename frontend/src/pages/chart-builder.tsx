@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ChartRenderer } from '../components/chart-renderer'
 import { DataTable } from '../components/data-table'
 import { MonacoSqlEditor } from '../components/monaco-sql-editor'
@@ -92,6 +93,7 @@ function buildChartSql({
 }
 
 export function ChartBuilderPage() {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const datasetsQuery = useQuery({ queryKey: ['bi', 'datasets'], queryFn: api.listDatasets })
   const [name, setName] = useState('Revenue by Region')
@@ -164,6 +166,7 @@ export function ChartBuilderPage() {
       queryClient.invalidateQueries({ queryKey: ['bi', 'charts'] })
       setName(chart.name)
       setStatusMessage(`Saved chart ${chart.name}.`)
+      navigate(`/bi/charts?chartId=${encodeURIComponent(chart.id)}`)
     },
     onError: (error: Error) => {
       setStatusMessage(error.message)
@@ -227,6 +230,19 @@ export function ChartBuilderPage() {
         eyebrow="Visual Analytics"
         title="Chart Builder"
         description="Build charts from semantic datasets with guided field selection, auto-generated SQL, live chart previews, and saveable metadata for dashboards."
+        actions={
+          <>
+            <Button tone="ghost" onClick={generateSql}>
+              Generate SQL
+            </Button>
+            <Button tone="ghost" disabled={previewMutation.isPending} onClick={() => previewMutation.mutate({ sql, limit: 200 })}>
+              {previewMutation.isPending ? 'Previewing...' : 'Preview Chart'}
+            </Button>
+            <Button disabled={saveMutation.isPending} onClick={saveChart}>
+              {saveMutation.isPending ? 'Saving...' : 'Save Chart'}
+            </Button>
+          </>
+        }
       />
 
       <Panel className="grid gap-4 xl:grid-cols-[1fr_0.9fr_1fr]">
@@ -241,6 +257,7 @@ export function ChartBuilderPage() {
         <div className="rounded-2xl bg-cyan-50 p-4 text-sm text-lagoon">
           <p className="font-semibold">Builder Status</p>
           <p className="mt-2 leading-6">{statusMessage}</p>
+          <p className="mt-3 text-xs uppercase tracking-[0.2em] text-lagoon/70">Preview does not save the chart. Use “Save Chart” to add it to the Saved Charts library.</p>
         </div>
       </Panel>
 
@@ -315,10 +332,10 @@ export function ChartBuilderPage() {
                 <Button tone="ghost" onClick={generateSql}>
                   Generate Guided SQL
                 </Button>
-                <Button disabled={previewMutation.isPending} onClick={() => previewMutation.mutate({ sql, limit: 200 })}>
+                <Button tone="ghost" disabled={previewMutation.isPending} onClick={() => previewMutation.mutate({ sql, limit: 200 })}>
                   {previewMutation.isPending ? 'Previewing...' : 'Preview Chart'}
                 </Button>
-                <Button tone="secondary" disabled={saveMutation.isPending} onClick={saveChart}>
+                <Button disabled={saveMutation.isPending} onClick={saveChart}>
                   {saveMutation.isPending ? 'Saving...' : 'Save Chart'}
                 </Button>
               </div>
@@ -335,6 +352,15 @@ export function ChartBuilderPage() {
                 </span>
               </div>
               <MonacoSqlEditor value={sql} onChange={setSql} height={300} />
+              <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-ink">Ready to add this chart to the library?</p>
+                  <p className="mt-1 text-sm text-slate/70">Previewing checks the query only. Saving publishes it to the `Saved Charts` tab.</p>
+                </div>
+                <Button className="min-w-44" disabled={saveMutation.isPending} onClick={saveChart}>
+                  {saveMutation.isPending ? 'Saving...' : 'Save Chart To Library'}
+                </Button>
+              </div>
             </Panel>
 
             {previewColumns.length ? <DataTable columns={previewColumns} rows={previewRows} /> : null}
