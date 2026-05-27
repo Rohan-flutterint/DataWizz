@@ -16,6 +16,8 @@ class PipelineService:
     def __init__(self) -> None:
         self.duckdb_service = DuckDBService()
         self.delta_service = DeltaService()
+        self.supported_join_types = {"inner", "left", "right", "full"}
+        self.supported_aggregations = {"sum", "avg", "count", "min", "max"}
 
     def _require_config(self, data: dict, key: str, node_id: str, node_type: str) -> str:
         value = data.get(key)
@@ -25,9 +27,26 @@ class PipelineService:
             )
         return str(value)
 
-    def validate_definition(self, definition: dict) -> tuple[bool, list[str], list[str]]:
+    def _node_config(self, node: dict) -> dict:
+        data = node.get("data", {})
+        if isinstance(data, dict):
+            config = data.get("config", data)
+            return config if isinstance(config, dict) else {}
+        return {}
+
+    def validate_definition(
+        self,
+        definition: dict,
+        *,
+        uploaded_files: dict[str, UploadedFile] | None = None,
+        delta_tables: dict[str, DeltaTable] | None = None,
+    ) -> tuple[bool, list[str], list[str]]:
         graph = nx.DiGraph()
         issues: list[str] = []
+        node_ids = [node["id"] for node in definition.get("nodes", [])]
+        if len(node_ids) != len(set(node_ids)):
+            issues.append("Pipeline graph contains duplicate node IDs. Remove the duplicate node and try again.")
+
         for node in definition.get("nodes", []):
             graph.add_node(node["id"], **node)
         for edge in definition.get("edges", []):
@@ -38,9 +57,127 @@ class PipelineService:
             return False, [], issues
 
         for node in definition.get("nodes", []):
-            if node["type"] in {"filter", "select", "sql", "validate", "writeDelta"} and graph.in_degree(node["id"]) == 0:
-                issues.append(f"Node {node['id']} requires an upstream input.")
+            node_id = node["id"]
+            node_type = node["type"]
+            incoming = list(graph.predecessors(node_id))
+            outgoing = list(graph.successors(node_id))
+            config = self._node_config(node)
 
+            if node_type in {"filter", "select", "validate", "writeDelta"} and len(incoming) != 1:
+                issues.append(f"Node {node_id} ({node_type}) requires exactly one upstream input.")
+
+            if node_type == "fileSource":
+                file_id = str(config.get("fileId") or "").strip()
+                if incoming:
+                    issues.append(f"Node {node_id} (fileSource) cannot accept upstream inputs.")
+                if not file_id:
+                    issues.append(f"Node {node_id} (fileSource) is missing an uploaded file selection.")
+                elif uploaded_files is not None and file_id not in uploaded_files:
+                    issues.append(f"Node {node_id} (fileSource) references a file that no longer exists.")
+
+            elif node_type == "deltaSource":
+                table_id = str(config.get("tableId") or "").strip()
+                if incoming:
+                    issues.append(f"Node {node_id} (deltaSource) cannot accept upstream inputs.")
+                if not table_id:
+                    issues.append(f"Node {node_id} (deltaSource) is missing a Delta table selection.")
+                elif delta_tables is not None and table_id not in delta_tables:
+                    issues.append(f"Node {node_id} (deltaSource) references a Delta table that no longer exists.")
+
+            elif node_type == "filter":
+                condition = str(config.get("condition") or "").strip()
+                if not condition:
+                    issues.append(f"Node {node_id} (filter) needs a SQL filter condition.")
+
+            elif node_type == "select":
+                columns = config.get("columns") or []
+                if isinstance(columns, list) and not [column for column in columns if str(column).strip()]:
+                    issues.append(f"Node {node_id} (select) needs at least one selected column or `*`.")
+
+            elif node_type == "join":
+                join_type = str(config.get("joinType") or "inner").lower().strip()
+                left_key = str(config.get("leftKey") or "").strip()
+                right_key = str(config.get("rightKey") or "").strip()
+                left_source_id = str(config.get("leftSourceId") or "").strip()
+                right_source_id = str(config.get("rightSourceId") or "").strip()
+                if len(incoming) != 2:
+                    issues.append(f"Node {node_id} (join) requires exactly two upstream datasets.")
+                if join_type not in self.supported_join_types:
+                    issues.append(f"Node {node_id} (join) uses unsupported join type `{join_type}`.")
+                if not left_key:
+                    issues.append(f"Node {node_id} (join) is missing the left join key.")
+                if not right_key:
+                    issues.append(f"Node {node_id} (join) is missing the right join key.")
+                if left_source_id and left_source_id not in incoming:
+                    issues.append(f"Node {node_id} (join) left input must be one of the connected upstream nodes.")
+                if right_source_id and right_source_id not in incoming:
+                    issues.append(f"Node {node_id} (join) right input must be one of the connected upstream nodes.")
+                if left_source_id and right_source_id and left_source_id == right_source_id:
+                    issues.append(f"Node {node_id} (join) cannot use the same upstream node for both left and right inputs.")
+
+            elif node_type == "aggregate":
+                if len(incoming) != 1:
+                    issues.append(f"Node {node_id} (aggregate) requires exactly one upstream dataset.")
+                metrics = config.get("metrics") or []
+                if not isinstance(metrics, list) or not metrics:
+                    issues.append(f"Node {node_id} (aggregate) needs at least one metric definition.")
+                else:
+                    aliases: set[str] = set()
+                    for index, metric in enumerate(metrics, start=1):
+                        if not isinstance(metric, dict):
+                            issues.append(f"Node {node_id} (aggregate) metric {index} is malformed.")
+                            continue
+                        agg = str(metric.get("agg") or "").lower().strip()
+                        column = str(metric.get("column") or "").strip()
+                        alias = str(metric.get("alias") or "").strip()
+                        if agg not in self.supported_aggregations:
+                            issues.append(
+                                f"Node {node_id} (aggregate) metric {index} uses unsupported aggregation `{agg}`."
+                            )
+                        if not column:
+                            issues.append(f"Node {node_id} (aggregate) metric {index} is missing a source column.")
+                        if not alias:
+                            issues.append(f"Node {node_id} (aggregate) metric {index} is missing an alias.")
+                        elif alias in aliases:
+                            issues.append(f"Node {node_id} (aggregate) metric alias `{alias}` is duplicated.")
+                        else:
+                            aliases.add(alias)
+
+            elif node_type == "sql":
+                sql = str(config.get("sql") or "").strip()
+                if not incoming:
+                    issues.append(f"Node {node_id} (sql) requires at least one upstream input.")
+                if not sql:
+                    issues.append(f"Node {node_id} (sql) needs a SQL statement.")
+                if len(incoming) > 1 and sql:
+                    for index in range(1, len(incoming) + 1):
+                        if f"{{{{input_{index}}}}}" not in sql:
+                            issues.append(
+                                f"Node {node_id} (sql) should reference each upstream dataset with placeholders like `{{{{input_{index}}}}}`."
+                            )
+
+            elif node_type == "validate":
+                min_rows = int(config.get("minRows", 1) or 1)
+                if min_rows < 1:
+                    issues.append(f"Node {node_id} (validate) minimum rows must be at least 1.")
+
+            elif node_type == "writeDelta":
+                table_name = str(config.get("tableName") or "").strip()
+                mode = str(config.get("mode") or "overwrite").strip()
+                if not table_name:
+                    issues.append(f"Node {node_id} (writeDelta) needs a target table name.")
+                if mode not in {"overwrite", "append"}:
+                    issues.append(f"Node {node_id} (writeDelta) must use either overwrite or append mode.")
+
+            elif node_type == "schedule":
+                cron = str(config.get("cron") or "").strip()
+                if incoming or outgoing:
+                    issues.append(f"Node {node_id} (schedule) is metadata only and should not be wired into the DAG.")
+                if not cron:
+                    issues.append(f"Node {node_id} (schedule) needs a cron expression.")
+
+            if node_type != "schedule" and not incoming and node_type not in {"fileSource", "deltaSource"}:
+                issues.append(f"Node {node_id} ({node_type}) requires an upstream input.")
         return len(issues) == 0, list(nx.topological_sort(graph)), issues
 
     def create_log(
@@ -75,7 +212,13 @@ class PipelineService:
         trigger_type: str = "manual",
         retry_of_run_id: str | None = None,
     ) -> PipelineRun:
-        valid, ordered_nodes, issues = self.validate_definition(pipeline.definition_json)
+        uploaded_files = {record.id: record for record in db.query(UploadedFile).all()}
+        delta_tables = {record.id: record for record in db.query(DeltaTable).all()}
+        valid, ordered_nodes, issues = self.validate_definition(
+            pipeline.definition_json,
+            uploaded_files=uploaded_files,
+            delta_tables=delta_tables,
+        )
         run = PipelineRun(
             pipeline_id=pipeline.id,
             status="pending",
@@ -100,8 +243,6 @@ class PipelineService:
         run.status = "running"
         db.commit()
 
-        uploaded_files = {record.id: record for record in db.query(UploadedFile).all()}
-        delta_tables = {record.id: record for record in db.query(DeltaTable).all()}
         graph_inputs: dict[str, list[str]] = defaultdict(list)
         for edge in pipeline.definition_json.get("edges", []):
             graph_inputs[edge["target"]].append(edge["source"])
@@ -171,19 +312,29 @@ class PipelineService:
                 elif node_type == "join":
                     if len(input_views) < 2:
                         raise ValueError("Join node requires two upstream datasets.")
-                    join_type = config.get("joinType", "inner")
+                    join_type = str(config.get("joinType", "inner")).lower()
                     left_key = self._require_config(config, "leftKey", node_id, node_type)
                     right_key = self._require_config(config, "rightKey", node_id, node_type)
+                    left_source_id = str(config.get("leftSourceId") or input_nodes[0]).strip()
+                    right_source_id = str(config.get("rightSourceId") or input_nodes[1]).strip()
+                    if left_source_id == right_source_id:
+                        raise ValueError(f"Join node {node_id} cannot use the same upstream input on both sides.")
+                    if left_source_id not in view_names or right_source_id not in view_names:
+                        raise ValueError(f"Join node {node_id} must map both left and right inputs to connected upstream nodes.")
+                    left_view = view_names[left_source_id]
+                    right_view = view_names[right_source_id]
                     conn.execute(
                         f"""
                         CREATE OR REPLACE VIEW {view_name} AS
                         SELECT *
-                        FROM {input_views[0]} AS left_side
-                        {join_type.upper()} JOIN {input_views[1]} AS right_side
+                        FROM {left_view} AS left_side
+                        {join_type.upper()} JOIN {right_view} AS right_side
                         ON left_side.{left_key} = right_side.{right_key}
                         """
                     )
                 elif node_type == "aggregate":
+                    if len(input_views) != 1:
+                        raise ValueError(f"Aggregate node {node_id} requires exactly one upstream dataset.")
                     group_by = config.get("groupBy") or []
                     metrics = config.get("metrics") or [{"agg": "count", "column": "*", "alias": "row_count"}]
                     metrics_sql = ", ".join(

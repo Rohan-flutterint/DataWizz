@@ -51,18 +51,46 @@ type BuilderProps = {
   availableTables: DeltaTable[]
 }
 
+type InputOption = {
+  id: string
+  label: string
+  type: string
+}
+
+type BuilderIssue = {
+  nodeId: string | null
+  severity: 'error' | 'warning'
+  message: string
+}
+
+type PipelineTemplate = {
+  id: string
+  name: string
+  summary: string
+  build: (context: { availableFiles: UploadedFile[]; availableTables: DeltaTable[] }) => {
+    pipelineName: string
+    description: string
+    scheduleCron: string
+    nodes: Node<BuilderNodeData>[]
+    edges: Edge[]
+  }
+}
+
 const nodeDefaults: Record<PipelineNodeType, { label: string; config: Record<string, unknown> }> = {
   fileSource: { label: 'File Source', config: { fileId: '' } },
   deltaSource: { label: 'Delta Source', config: { tableId: '' } },
   filter: { label: 'Filter Rows', config: { condition: '1 = 1' } },
   select: { label: 'Select Columns', config: { columns: ['*'] } },
-  join: { label: 'Join Datasets', config: { joinType: 'inner', leftKey: '', rightKey: '' } },
-  aggregate: { label: 'Aggregate', config: { groupBy: [], metrics: [{ agg: 'sum', column: 'amount', alias: 'total_amount' }] } },
+  join: { label: 'Join Datasets', config: { joinType: 'inner', leftKey: '', rightKey: '', leftSourceId: '', rightSourceId: '' } },
+  aggregate: { label: 'Aggregate', config: { groupBy: [], metrics: [{ agg: 'sum', column: 'revenue', alias: 'total_revenue' }] } },
   sql: { label: 'SQL Transform', config: { sql: 'SELECT * FROM {{input_1}}' } },
   validate: { label: 'Validate Data', config: { minRows: 1 } },
   writeDelta: { label: 'Write Delta', config: { tableName: 'sales_curated', schemaName: 'analytics', mode: 'overwrite', description: '' } },
   schedule: { label: 'Schedule', config: { cron: '0 8 * * *', note: 'Daily 8 AM refresh' } },
 }
+
+const supportedJoinTypes = ['inner', 'left', 'right', 'full'] as const
+const supportedAggregations = ['sum', 'avg', 'count', 'min', 'max'] as const
 
 function titleizeType(type: string) {
   return type
@@ -128,6 +156,10 @@ function parseMetrics(value: string) {
     })
 }
 
+function nodeConfig(node: Node<BuilderNodeData>) {
+  return node.data.config
+}
+
 function describeNode(data: BuilderNodeData) {
   const config = data.config
   switch (data.type) {
@@ -168,14 +200,319 @@ function BuilderNode({ data }: { data: BuilderNodeData }) {
 
 const nodeTypes = Object.fromEntries(pipelineTypes.map((type) => [type, BuilderNode]))
 
+function inputOptionsForNode(nodeId: string, nodes: Node<BuilderNodeData>[], edges: Edge[]): InputOption[] {
+  return edges
+    .filter((edge) => edge.target === nodeId)
+    .map((edge) => nodes.find((node) => node.id === edge.source))
+    .filter((node): node is Node<BuilderNodeData> => Boolean(node))
+    .map((node) => ({
+      id: node.id,
+      label: node.data.label,
+      type: String(node.type ?? node.data.type),
+    }))
+}
+
+function buildGuardrails(
+  nodes: Node<BuilderNodeData>[],
+  edges: Edge[],
+  availableFiles: UploadedFile[],
+  availableTables: DeltaTable[],
+): BuilderIssue[] {
+  const issues: BuilderIssue[] = []
+  const fileIds = new Set(availableFiles.map((file) => file.id))
+  const tableIds = new Set(availableTables.map((table) => table.id))
+  const nodeIds = nodes.map((node) => node.id)
+
+  if (nodeIds.length !== new Set(nodeIds).size) {
+    issues.push({ nodeId: null, severity: 'error', message: 'Node IDs must stay unique. Re-apply the template or remove the duplicate node.' })
+  }
+
+  if (!nodes.some((node) => node.type === 'writeDelta')) {
+    issues.push({ nodeId: null, severity: 'warning', message: 'This pipeline does not currently publish a curated Delta table.' })
+  }
+
+  for (const node of nodes) {
+    const config = nodeConfig(node)
+    const incoming = inputOptionsForNode(node.id, nodes, edges)
+
+    if (node.type === 'fileSource') {
+      const fileId = String(config.fileId ?? '').trim()
+      if (incoming.length) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'File source nodes cannot accept upstream connections.' })
+      }
+      if (!fileId) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'Choose an uploaded file for this source node.' })
+      } else if (!fileIds.has(fileId)) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'The selected uploaded file no longer exists.' })
+      }
+      continue
+    }
+
+    if (node.type === 'deltaSource') {
+      const tableId = String(config.tableId ?? '').trim()
+      if (incoming.length) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'Delta source nodes cannot accept upstream connections.' })
+      }
+      if (!tableId) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'Choose a Delta table for this source node.' })
+      } else if (!tableIds.has(tableId)) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'The selected Delta table no longer exists.' })
+      }
+      continue
+    }
+
+    if (node.type === 'join') {
+      const leftSourceId = String(config.leftSourceId ?? '').trim()
+      const rightSourceId = String(config.rightSourceId ?? '').trim()
+      const leftKey = String(config.leftKey ?? '').trim()
+      const rightKey = String(config.rightKey ?? '').trim()
+      const joinType = String(config.joinType ?? 'inner').trim().toLowerCase()
+      if (incoming.length !== 2) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'Join nodes must have exactly two upstream datasets.' })
+      }
+      if (!supportedJoinTypes.includes(joinType as (typeof supportedJoinTypes)[number])) {
+        issues.push({ nodeId: node.id, severity: 'error', message: `Join type must be one of ${supportedJoinTypes.join(', ')}.` })
+      }
+      if (!leftKey || !rightKey) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'Provide both left and right join keys before validation.' })
+      }
+      if (incoming.length >= 2 && (!leftSourceId || !rightSourceId)) {
+        issues.push({ nodeId: node.id, severity: 'warning', message: 'Map the connected upstream datasets explicitly so the left and right sides stay deterministic.' })
+      }
+      if (leftSourceId && !incoming.some((input) => input.id === leftSourceId)) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'The chosen left join input is not connected to this node.' })
+      }
+      if (rightSourceId && !incoming.some((input) => input.id === rightSourceId)) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'The chosen right join input is not connected to this node.' })
+      }
+      if (leftSourceId && rightSourceId && leftSourceId === rightSourceId) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'Left and right join inputs must be different upstream nodes.' })
+      }
+      continue
+    }
+
+    if (node.type === 'aggregate') {
+      const metrics = Array.isArray(config.metrics) ? config.metrics : []
+      if (incoming.length !== 1) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'Aggregate nodes must have exactly one upstream dataset.' })
+      }
+      if (!metrics.length) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'Add at least one metric in agg:column:alias format.' })
+      }
+      const aliases = new Set<string>()
+      metrics.forEach((metric, index) => {
+        const entry = metric as Record<string, unknown>
+        const agg = String(entry?.agg ?? '').trim().toLowerCase()
+        const column = String(entry?.column ?? '').trim()
+        const alias = String(entry?.alias ?? '').trim()
+        if (!supportedAggregations.includes(agg as (typeof supportedAggregations)[number])) {
+          issues.push({ nodeId: node.id, severity: 'error', message: `Metric ${index + 1} must use ${supportedAggregations.join(', ')}.` })
+        }
+        if (!column || !alias) {
+          issues.push({ nodeId: node.id, severity: 'error', message: `Metric ${index + 1} needs both a source column and an alias.` })
+        }
+        if (alias) {
+          if (aliases.has(alias)) {
+            issues.push({ nodeId: node.id, severity: 'error', message: `Metric alias \`${alias}\` is duplicated.` })
+          }
+          aliases.add(alias)
+        }
+      })
+      continue
+    }
+
+    if (node.type === 'sql') {
+      const sql = String(config.sql ?? '').trim()
+      if (!incoming.length) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'SQL transforms need at least one upstream dataset.' })
+      }
+      if (!sql) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'Add the SQL statement for this transform node.' })
+      }
+      if (incoming.length > 1) {
+        const missingPlaceholders = incoming.filter((_, index) => !sql.includes(`{{input_${index + 1}}}`))
+        if (missingPlaceholders.length) {
+          issues.push({ nodeId: node.id, severity: 'warning', message: 'Reference each upstream dataset with placeholders like {{input_1}} and {{input_2}}.' })
+        }
+      }
+      continue
+    }
+
+    if (node.type === 'schedule') {
+      if (incoming.length || edges.some((edge) => edge.source === node.id)) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'Schedule nodes are metadata only and should stay disconnected from the DAG.' })
+      }
+      if (!String(config.cron ?? '').trim()) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'Add a cron expression for this schedule node.' })
+      }
+      continue
+    }
+
+    if (node.type === 'filter' && !String(config.condition ?? '').trim()) {
+      issues.push({ nodeId: node.id, severity: 'error', message: 'Filter nodes need a SQL condition.' })
+    }
+    if (node.type === 'select' && !formatList(config.columns).trim()) {
+      issues.push({ nodeId: node.id, severity: 'error', message: 'Select nodes need at least one column or *.' })
+    }
+    if (node.type === 'validate' && Number(config.minRows ?? 1) < 1) {
+      issues.push({ nodeId: node.id, severity: 'error', message: 'Validation minimum rows must be at least 1.' })
+    }
+    if (node.type === 'writeDelta') {
+      if (!String(config.tableName ?? '').trim()) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'Write Delta nodes need a target table name.' })
+      }
+      const mode = String(config.mode ?? 'overwrite').trim()
+      if (!['overwrite', 'append'].includes(mode)) {
+        issues.push({ nodeId: node.id, severity: 'error', message: 'Write mode must be overwrite or append.' })
+      }
+    }
+    if (!['fileSource', 'deltaSource', 'schedule'].includes(String(node.type)) && incoming.length === 0) {
+      issues.push({ nodeId: node.id, severity: 'error', message: `${titleizeType(String(node.type))} nodes require an upstream input.` })
+    }
+  }
+
+  return issues
+}
+
+const pipelineTemplates: PipelineTemplate[] = [
+  {
+    id: 'sql-curation',
+    name: 'SQL Curation',
+    summary: 'Start from one raw file, transform it in SQL, then publish a curated Delta table.',
+    build: ({ availableFiles }) => ({
+      pipelineName: 'Sales Curated Pipeline',
+      description: 'Read a raw sales file, transform it with SQL, and publish a curated Delta table.',
+      scheduleCron: '0 8 * * *',
+      nodes: [
+        {
+          id: 'fileSource_1',
+          type: 'fileSource',
+          position: { x: 40, y: 120 },
+          data: { label: 'Raw Sales', config: { fileId: availableFiles[0]?.id ?? '' }, type: 'fileSource' },
+        },
+        {
+          id: 'sql_2',
+          type: 'sql',
+          position: { x: 320, y: 120 },
+          data: { label: 'SQL Transform', config: { sql: 'SELECT * FROM {{input_1}}' }, type: 'sql' },
+        },
+        {
+          id: 'writeDelta_3',
+          type: 'writeDelta',
+          position: { x: 620, y: 120 },
+          data: { label: 'Write Delta', config: { tableName: 'sales_curated', schemaName: 'analytics', mode: 'overwrite', description: '' }, type: 'writeDelta' },
+        },
+      ],
+      edges: [
+        { id: 'edge_1', source: 'fileSource_1', target: 'sql_2' },
+        { id: 'edge_2', source: 'sql_2', target: 'writeDelta_3' },
+      ],
+    }),
+  },
+  {
+    id: 'join-enrichment',
+    name: 'Join Enrichment',
+    summary: 'Combine two upstream datasets with explicit left/right mapping, then publish the enriched result.',
+    build: ({ availableFiles }) => ({
+      pipelineName: 'Customer Order Enrichment',
+      description: 'Join orders with customer attributes and publish an enriched curated Delta table.',
+      scheduleCron: '0 9 * * 1-5',
+      nodes: [
+        {
+          id: 'fileSource_1',
+          type: 'fileSource',
+          position: { x: 40, y: 80 },
+          data: { label: 'Orders', config: { fileId: availableFiles[0]?.id ?? '' }, type: 'fileSource' },
+        },
+        {
+          id: 'fileSource_2',
+          type: 'fileSource',
+          position: { x: 40, y: 260 },
+          data: { label: 'Customers', config: { fileId: availableFiles[1]?.id ?? '' }, type: 'fileSource' },
+        },
+        {
+          id: 'join_3',
+          type: 'join',
+          position: { x: 340, y: 180 },
+          data: {
+            label: 'Join Orders + Customers',
+            config: { joinType: 'left', leftKey: 'customer_id', rightKey: 'customer_id', leftSourceId: 'fileSource_1', rightSourceId: 'fileSource_2' },
+            type: 'join',
+          },
+        },
+        {
+          id: 'writeDelta_4',
+          type: 'writeDelta',
+          position: { x: 650, y: 180 },
+          data: { label: 'Write Delta', config: { tableName: 'customer_orders_curated', schemaName: 'analytics', mode: 'overwrite', description: '' }, type: 'writeDelta' },
+        },
+      ],
+      edges: [
+        { id: 'edge_1', source: 'fileSource_1', target: 'join_3' },
+        { id: 'edge_2', source: 'fileSource_2', target: 'join_3' },
+        { id: 'edge_3', source: 'join_3', target: 'writeDelta_4' },
+      ],
+    }),
+  },
+  {
+    id: 'aggregation-mart',
+    name: 'Aggregation Mart',
+    summary: 'Roll up a source dataset into KPI-style metrics with prefilled aggregate definitions.',
+    build: ({ availableFiles, availableTables }) => ({
+      pipelineName: 'Regional Revenue Mart',
+      description: 'Aggregate sales by region and publish a metric-friendly Delta table for dashboards.',
+      scheduleCron: '30 7 * * *',
+      nodes: [
+        {
+          id: 'fileSource_1',
+          type: availableTables.length ? 'deltaSource' : 'fileSource',
+          position: { x: 40, y: 120 },
+          data:
+            availableTables.length
+              ? { label: 'Curated Sales', config: { tableId: availableTables[0]?.id ?? '' }, type: 'deltaSource' }
+              : { label: 'Raw Sales', config: { fileId: availableFiles[0]?.id ?? '' }, type: 'fileSource' },
+        },
+        {
+          id: 'aggregate_2',
+          type: 'aggregate',
+          position: { x: 340, y: 120 },
+          data: {
+            label: 'Revenue Rollup',
+            config: {
+              groupBy: ['region'],
+              metrics: [
+                { agg: 'sum', column: 'amount', alias: 'total_amount' },
+                { agg: 'count', column: '*', alias: 'order_count' },
+                { agg: 'avg', column: 'amount', alias: 'avg_order_amount' },
+              ],
+            },
+            type: 'aggregate',
+          },
+        },
+        {
+          id: 'writeDelta_3',
+          type: 'writeDelta',
+          position: { x: 650, y: 120 },
+          data: { label: 'Write Delta', config: { tableName: 'regional_revenue_mart', schemaName: 'analytics', mode: 'overwrite', description: '' }, type: 'writeDelta' },
+        },
+      ],
+      edges: [
+        { id: 'edge_1', source: 'fileSource_1', target: 'aggregate_2' },
+        { id: 'edge_2', source: 'aggregate_2', target: 'writeDelta_3' },
+      ],
+    }),
+  },
+]
+
 type NodeFieldsProps = {
   node: Node<BuilderNodeData>
   availableFiles: UploadedFile[]
   availableTables: DeltaTable[]
   updateConfig: (patch: Record<string, unknown>) => void
+  inputOptions: InputOption[]
 }
 
-function NodeFields({ node, availableFiles, availableTables, updateConfig }: NodeFieldsProps) {
+function NodeFields({ node, availableFiles, availableTables, updateConfig, inputOptions }: NodeFieldsProps) {
   const config = node.data.config
 
   switch (node.type) {
@@ -205,7 +542,7 @@ function NodeFields({ node, availableFiles, availableTables, updateConfig }: Nod
               <option value="">Select a Delta table</option>
               {availableTables.map((table) => (
                 <option key={table.id} value={table.id}>
-                  {table.name}
+                  {table.schema_name}.{table.name}
                 </option>
               ))}
             </Select>
@@ -243,29 +580,77 @@ function NodeFields({ node, availableFiles, availableTables, updateConfig }: Nod
       )
     case 'join':
       return (
-        <div className="grid gap-4">
+        <div className="space-y-4">
+          <div className="rounded-2xl bg-cyan-50 p-3 text-sm text-lagoon">
+            <p className="font-semibold">Join Guardrail</p>
+            <p className="mt-2 leading-6">Connect exactly two upstream nodes, then map each one explicitly so the left and right sides stay stable even if edges move around.</p>
+          </div>
           <div>
             <Label>Join Type</Label>
             <Select value={String(config.joinType ?? 'inner')} onChange={(event) => updateConfig({ joinType: event.target.value })}>
-              <option value="inner">inner</option>
-              <option value="left">left</option>
-              <option value="right">right</option>
-              <option value="full">full</option>
+              {supportedJoinTypes.map((joinType) => (
+                <option key={joinType} value={joinType}>
+                  {joinType}
+                </option>
+              ))}
             </Select>
           </div>
-          <div>
-            <Label>Left Key</Label>
-            <Input value={String(config.leftKey ?? '')} onChange={(event) => updateConfig({ leftKey: event.target.value })} placeholder="customer_id" />
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <Label>Left Input</Label>
+              <Select value={String(config.leftSourceId ?? '')} onChange={(event) => updateConfig({ leftSourceId: event.target.value })}>
+                <option value="">Select connected node</option>
+                {inputOptions.map((input) => (
+                  <option key={input.id} value={input.id}>
+                    {input.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label>Right Input</Label>
+              <Select value={String(config.rightSourceId ?? '')} onChange={(event) => updateConfig({ rightSourceId: event.target.value })}>
+                <option value="">Select connected node</option>
+                {inputOptions.map((input) => (
+                  <option key={input.id} value={input.id}>
+                    {input.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
           </div>
-          <div>
-            <Label>Right Key</Label>
-            <Input value={String(config.rightKey ?? '')} onChange={(event) => updateConfig({ rightKey: event.target.value })} placeholder="customer_id" />
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <Label>Left Key</Label>
+              <Input value={String(config.leftKey ?? '')} onChange={(event) => updateConfig({ leftKey: event.target.value })} placeholder="customer_id" />
+            </div>
+            <div>
+              <Label>Right Key</Label>
+              <Input value={String(config.rightKey ?? '')} onChange={(event) => updateConfig({ rightKey: event.target.value })} placeholder="customer_id" />
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              tone="ghost"
+              className="text-xs"
+              onClick={() => {
+                if (inputOptions.length >= 2) {
+                  updateConfig({ leftSourceId: inputOptions[0].id, rightSourceId: inputOptions[1].id })
+                }
+              }}
+            >
+              Use Connected Inputs
+            </Button>
           </div>
         </div>
       )
     case 'aggregate':
       return (
         <div className="space-y-4">
+          <div className="rounded-2xl bg-slate-50 p-3 text-sm text-slate/70">
+            <p className="font-semibold text-ink">Aggregate Guardrail</p>
+            <p className="mt-2 leading-6">Keep one upstream dataset, define at least one metric, and make every metric alias unique so dashboards can reference them cleanly.</p>
+          </div>
           <div>
             <Label>Group By Columns</Label>
             <Input
@@ -283,7 +668,39 @@ function NodeFields({ node, availableFiles, availableTables, updateConfig }: Nod
               placeholder={'sum:amount:total_amount\ncount:*:order_count'}
             />
           </div>
-          <p className="text-xs leading-5 text-slate/65">Use one metric per line in `agg:column:alias` format.</p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              tone="ghost"
+              className="text-xs"
+              onClick={() =>
+                updateConfig({
+                  groupBy: ['region'],
+                  metrics: [
+                    { agg: 'sum', column: 'revenue', alias: 'total_revenue' },
+                    { agg: 'count', column: '*', alias: 'order_count' },
+                  ],
+                })
+              }
+            >
+              Revenue Rollup Example
+            </Button>
+            <Button
+              tone="ghost"
+              className="text-xs"
+              onClick={() =>
+                updateConfig({
+                  groupBy: ['order_date'],
+                  metrics: [
+                    { agg: 'count', column: '*', alias: 'row_count' },
+                    { agg: 'avg', column: 'revenue', alias: 'avg_revenue' },
+                  ],
+                })
+              }
+            >
+              Daily KPI Example
+            </Button>
+          </div>
+          <p className="text-xs leading-5 text-slate/65">Use one metric per line in `agg:column:alias` format. Supported aggregations: {supportedAggregations.join(', ')}.</p>
         </div>
       )
     case 'sql':
@@ -401,6 +818,16 @@ export function PipelineBuilder({
   }, [nodes, selectedNodeId])
 
   const selectedNode = useMemo(() => nodes.find((node) => node.id === selectedNodeId) ?? null, [nodes, selectedNodeId])
+  const selectedInputOptions = useMemo(
+    () => (selectedNode ? inputOptionsForNode(selectedNode.id, nodes, edges) : []),
+    [selectedNode, nodes, edges],
+  )
+  const builderIssues = useMemo(() => buildGuardrails(nodes, edges, availableFiles, availableTables), [nodes, edges, availableFiles, availableTables])
+  const selectedNodeIssues = useMemo(
+    () => builderIssues.filter((issue) => issue.nodeId === null || issue.nodeId === selectedNodeId),
+    [builderIssues, selectedNodeId],
+  )
+  const blockingIssues = builderIssues.filter((issue) => issue.severity === 'error')
 
   const addNode = (type: PipelineNodeType) => {
     const nextId = `${type}_${nodes.length + 1}`
@@ -415,6 +842,16 @@ export function PipelineBuilder({
       },
     ])
     setSelectedNodeId(nextId)
+  }
+
+  const applyTemplate = (template: PipelineTemplate) => {
+    const result = template.build({ availableFiles, availableTables })
+    setName(result.pipelineName)
+    setDescription(result.description)
+    setScheduleCron(result.scheduleCron)
+    setNodes(normalizeNodes(result.nodes))
+    setEdges(result.edges)
+    setSelectedNodeId(result.nodes[0]?.id ?? null)
   }
 
   const onConnect = (connection: Edge | Connection) => setEdges((current) => addEdge({ ...connection, id: `edge_${current.length + 1}` }, current))
@@ -444,7 +881,7 @@ export function PipelineBuilder({
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)_360px]">
+    <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)_380px]">
       <Panel className="space-y-5">
         <div>
           <Label>Pipeline Name</Label>
@@ -459,6 +896,25 @@ export function PipelineBuilder({
           <Input value={scheduleCron} onChange={(event) => setScheduleCron(event.target.value)} placeholder="0 8 * * *" />
           <p className="mt-2 text-xs leading-5 text-slate/65">Stored with the pipeline now so later scheduling and Airflow integration can reuse it.</p>
         </div>
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Label>Starter Templates</Label>
+            <span className="text-[11px] uppercase tracking-[0.22em] text-slate/45">Blueprints</span>
+          </div>
+          <div className="space-y-3">
+            {pipelineTemplates.map((template) => (
+              <div key={template.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="font-semibold text-ink">{template.name}</p>
+                <p className="mt-2 text-sm leading-6 text-slate/70">{template.summary}</p>
+                <Button className="mt-3 w-full" tone="ghost" onClick={() => applyTemplate(template)}>
+                  Apply Template
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div>
           <Label>Node Palette</Label>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -469,6 +925,16 @@ export function PipelineBuilder({
             ))}
           </div>
         </div>
+
+        <div className={`rounded-2xl p-4 text-sm ${blockingIssues.length ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>
+          <p className="font-semibold">{blockingIssues.length ? 'Guardrails need attention' : 'Builder health looks good'}</p>
+          <p className="mt-2 leading-6">
+            {blockingIssues.length
+              ? `${blockingIssues.length} blocking issue${blockingIssues.length === 1 ? '' : 's'} found. Fix the node-level guardrails on the right before running.`
+              : 'No blocking issues detected in the current graph. You can validate or run with confidence.'}
+          </p>
+        </div>
+
         <div className="space-y-3">
           <Button onClick={() => onSave({ name, description, nodes, edges })}>Save Pipeline</Button>
           {onValidate ? (
@@ -477,7 +943,7 @@ export function PipelineBuilder({
             </Button>
           ) : null}
           {onRun ? (
-            <Button tone="ghost" onClick={() => onRun({ nodes, edges })}>
+            <Button tone="ghost" disabled={blockingIssues.length > 0} onClick={() => onRun({ nodes, edges })}>
               Run Now
             </Button>
           ) : null}
@@ -505,7 +971,7 @@ export function PipelineBuilder({
               {availableTables.length ? (
                 availableTables.map((table) => (
                   <div key={table.id} className="rounded-2xl bg-cyan-50 px-3 py-2 text-sm text-lagoon">
-                    <p className="font-medium">{table.name}</p>
+                    <p className="font-medium">{table.schema_name}.{table.name}</p>
                     <p className="mt-1 truncate font-mono text-[11px] text-lagoon/70">{table.id}</p>
                   </div>
                 ))
@@ -517,7 +983,7 @@ export function PipelineBuilder({
         </div>
       </Panel>
 
-      <Panel className="h-[720px] overflow-hidden p-0">
+      <Panel className="h-[760px] overflow-hidden p-0">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -561,7 +1027,50 @@ export function PipelineBuilder({
               <Label>Node Label</Label>
               <Input value={selectedNode.data.label} onChange={(event) => updateSelectedLabel(event.target.value)} />
             </div>
-            <NodeFields node={selectedNode} availableFiles={availableFiles} availableTables={availableTables} updateConfig={updateSelectedConfig} />
+
+            {selectedInputOptions.length ? (
+              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate/70">
+                <p className="font-semibold text-ink">Connected Inputs</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {selectedInputOptions.map((input) => (
+                    <span key={input.id} className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700">
+                      {input.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <NodeFields
+              node={selectedNode}
+              availableFiles={availableFiles}
+              availableTables={availableTables}
+              updateConfig={updateSelectedConfig}
+              inputOptions={selectedInputOptions}
+            />
+
+            <div className="space-y-3 border-t border-slate-100 pt-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Node Guardrails</p>
+              {selectedNodeIssues.length ? (
+                <div className="space-y-2">
+                  {selectedNodeIssues.map((issue, index) => (
+                    <div
+                      key={`${issue.message}-${index}`}
+                      className={`rounded-2xl px-4 py-3 text-sm ${
+                        issue.severity === 'error' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
+                      }`}
+                    >
+                      {issue.message}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                  This node is configured cleanly based on its current upstream connections.
+                </div>
+              )}
+            </div>
+
             <div className="border-t border-slate-100 pt-4">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Config Preview</p>
               <pre className="mt-3 overflow-x-auto rounded-3xl bg-slate-950 p-4 font-mono text-xs leading-6 text-slate-100">
