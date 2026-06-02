@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -174,8 +174,27 @@ def get_run_details(run_id: str, db: Session = Depends(get_db)) -> PipelineRunDe
 
 
 @router.get("/logs/all", response_model=JobLogListResponse)
-def list_logs(db: Session = Depends(get_db)) -> JobLogListResponse:
-    items = db.query(JobLog).order_by(JobLog.created_at.desc()).limit(200).all()
+def list_logs(
+    db: Session = Depends(get_db),
+    run_id: str | None = Query(default=None),
+    node_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+) -> JobLogListResponse:
+    query = db.query(JobLog)
+    if run_id:
+        query = query.filter(JobLog.pipeline_run_id == run_id)
+    if status:
+        normalized = status.strip().lower()
+        query = query.filter(JobLog.status.is_not(None)).filter(JobLog.status.ilike(normalized))
+
+    items = query.order_by(JobLog.created_at.desc()).limit(400).all()
+    if node_id:
+        needle = node_id.strip()
+        items = [
+            item
+            for item in items
+            if isinstance(item.context_json, dict) and str(item.context_json.get("node_id") or "").strip() == needle
+        ]
     return JobLogListResponse(items=items)
 
 
