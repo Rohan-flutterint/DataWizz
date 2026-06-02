@@ -101,6 +101,24 @@ export type PipelineRunDetail = {
   logs: JobLog[]
 }
 
+export type PipelineSchedulerSweep = {
+  checked: number
+  triggered: { pipeline_id: string; pipeline_name: string; run_id: string; status: string }[]
+  invalid_schedules: { pipeline_id: string; pipeline_name: string; cron: string; reason: string }[]
+  next_due: { pipeline_id: string; pipeline_name: string; cron: string; next_run_at: string }[]
+}
+
+export type PipelineSchedulerStatus = {
+  enabled: boolean
+  running: boolean
+  timezone: string
+  poll_interval_seconds: number
+  last_tick_at?: string | null
+  last_error?: string | null
+  managed_pipeline_count: number
+  last_summary: PipelineSchedulerSweep
+}
+
 export type SemanticDataset = {
   id: string
   name: string

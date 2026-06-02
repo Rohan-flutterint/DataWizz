@@ -102,3 +102,21 @@ class PipelineValidationResponse(BaseModel):
 class AirflowDagResponse(BaseModel):
     pipeline_id: str
     code: str
+
+
+class SchedulerSweepResponse(BaseModel):
+    checked: int
+    triggered: list[dict] = Field(default_factory=list)
+    invalid_schedules: list[dict] = Field(default_factory=list)
+    next_due: list[dict] = Field(default_factory=list)
+
+
+class SchedulerStatusResponse(BaseModel):
+    enabled: bool
+    running: bool
+    timezone: str
+    poll_interval_seconds: int
+    last_tick_at: str | None = None
+    last_error: str | None = None
+    managed_pipeline_count: int
+    last_summary: SchedulerSweepResponse
