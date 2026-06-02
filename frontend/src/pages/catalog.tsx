@@ -192,21 +192,36 @@ export function CatalogPage() {
                         className={`w-full rounded-2xl border p-4 text-left transition ${
                           selectedTableId === table.id
                             ? theme === 'dark'
-                              ? 'border-[#f6f24a]/30 bg-[#f6f24a]/12 shadow-[0_0_0_1px_rgba(246,242,74,0.06)]'
+                              ? 'shadow-[0_0_0_1px_rgba(246,242,74,0.10)]'
                               : 'border-lagoon bg-cyan-50/80 shadow-sm'
                             : theme === 'dark'
                               ? 'border-white/10 bg-white/[0.03]'
                               : 'border-slate-100 bg-slate-50/80'
                         }`}
+                        style={
+                          selectedTableId === table.id && theme === 'dark'
+                            ? {
+                                backgroundColor: 'rgba(246, 242, 74, 0.16)',
+                                borderColor: 'rgba(246, 242, 74, 0.45)',
+                                boxShadow: '0 0 0 1px rgba(246, 242, 74, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.03)',
+                              }
+                            : undefined
+                        }
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="font-semibold text-ink">{table.name}</p>
-                            <p className="mt-1 text-sm text-slate/70">{table.description || 'No catalog description yet.'}</p>
+                            <p className={`mt-1 text-sm ${selectedTableId === table.id && theme === 'dark' ? 'text-white/78' : 'text-slate/70'}`}>
+                              {table.description || 'No catalog description yet.'}
+                            </p>
                           </div>
                           <span
                             className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
-                              theme === 'dark' ? 'bg-white/10 text-white/72' : 'bg-white text-slate/60'
+                              theme === 'dark'
+                                ? selectedTableId === table.id
+                                  ? 'bg-black/25 text-[#fff7a8]'
+                                  : 'bg-white/10 text-white/72'
+                                : 'bg-white text-slate/60'
                             }`}
                           >
                             {table.mode}
@@ -217,12 +232,28 @@ export function CatalogPage() {
                             {table.freshness_status || 'unknown'}
                           </span>
                           {table.owner ? (
-                            <span className={`rounded-full px-3 py-1 text-xs font-medium ${theme === 'dark' ? 'bg-white/10 text-white/80' : 'bg-white text-slate-700'}`}>
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-medium ${
+                                theme === 'dark'
+                                  ? selectedTableId === table.id
+                                    ? 'bg-black/20 text-white'
+                                    : 'bg-white/10 text-white/80'
+                                  : 'bg-white text-slate-700'
+                              }`}
+                            >
                               {table.owner}
                             </span>
                           ) : null}
                         </div>
-                        <div className={`mt-4 flex flex-wrap gap-2 text-xs ${theme === 'dark' ? 'text-white/55' : 'text-slate/60'}`}>
+                        <div
+                          className={`mt-4 flex flex-wrap gap-2 text-xs ${
+                            theme === 'dark'
+                              ? selectedTableId === table.id
+                                ? 'text-white/72'
+                                : 'text-white/55'
+                              : 'text-slate/60'
+                          }`}
+                        >
                           <span>{table.row_count ?? 0} rows</span>
                           <span>•</span>
                           <span>{table.schema_json?.length ?? 0} columns</span>
