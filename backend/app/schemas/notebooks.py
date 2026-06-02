@@ -24,12 +24,25 @@ class NotebookDocumentUpdateRequest(BaseModel):
     description: str | None = None
     cells_json: list[NotebookCell] = Field(default_factory=list)
 
+class NotebookCellExecutionResult(BaseModel):
+    cell_id: str
+    title: str | None = None
+    status: str
+    execution_ms: int
+    columns: list[str] = Field(default_factory=list)
+    rows: list[dict] = Field(default_factory=list)
+    row_count: int = 0
+    stdout: str | None = None
+    message: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
 
 class NotebookDocumentRead(TimestampedModel):
     name: str
     engine_id: str
     description: str | None = None
     cells_json: list[NotebookCell]
+    latest_cell_results_json: list[NotebookCellExecutionResult] = Field(default_factory=list)
     last_run_at: datetime | None = None
 
 
@@ -42,19 +55,6 @@ class NotebookRunRead(TimestampedModel):
     duration_ms: int | None = None
     error_message: str | None = None
     run_summary: dict | None = None
-
-
-class NotebookCellExecutionResult(BaseModel):
-    cell_id: str
-    title: str | None = None
-    status: str
-    execution_ms: int
-    columns: list[str] = Field(default_factory=list)
-    rows: list[dict] = Field(default_factory=list)
-    row_count: int = 0
-    stdout: str | None = None
-    message: str | None = None
-    warnings: list[str] = Field(default_factory=list)
 
 
 class NotebookListResponse(BaseModel):

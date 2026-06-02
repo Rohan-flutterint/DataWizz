@@ -14,6 +14,7 @@ class NotebookDocument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     engine_id: Mapped[str] = mapped_column(String(64), nullable=False, default="duckdb")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     cells_json: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    latest_cell_results_json: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

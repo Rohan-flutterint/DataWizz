@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import bi, engines, files, pipelines, queries, system, tables
 from app.core.config import get_settings
 from app.db.base import *  # noqa: F403
+from app.db.runtime_schema import ensure_runtime_schema
 from app.db.session import Base, engine
 from app.services.pipeline_scheduler_service import pipeline_scheduler_service
 from app.services.storage import StorageService
@@ -32,6 +33,7 @@ app.add_middleware(
 async def on_startup() -> None:
     storage_service.ensure_directories()
     Base.metadata.create_all(bind=engine)
+    ensure_runtime_schema(engine)
     await pipeline_scheduler_service.start()
 
 

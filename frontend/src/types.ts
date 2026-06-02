@@ -379,6 +379,7 @@ export type NotebookDocument = {
   engine_id: string
   description?: string | null
   cells_json: NotebookCell[]
+  latest_cell_results_json?: NotebookCellRunResult[]
   last_run_at?: string | null
   created_at: string
   updated_at: string

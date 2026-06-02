@@ -188,6 +188,11 @@ class ExecutionEngineService:
         finally:
             duration_ms = int((perf_counter() - run_started) * 1000)
             notebook.last_run_at = datetime.now(timezone.utc)
+            notebook.latest_cell_results_json = self._merge_notebook_cell_results(
+                notebook.latest_cell_results_json or [],
+                cell_results,
+                valid_cell_ids=[cell.get("id") for cell in cells if cell.get("id")],
+            )
             run.finished_at = datetime.now(timezone.utc)
             run.duration_ms = duration_ms
             run.run_summary = {
@@ -207,6 +212,32 @@ class ExecutionEngineService:
             db.refresh(notebook)
 
         return run, cell_results
+
+    def _merge_notebook_cell_results(
+        self,
+        existing_results: list[dict[str, Any]],
+        next_results: list[dict[str, Any]],
+        *,
+        valid_cell_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        merged: dict[str, dict[str, Any]] = {}
+        valid_ids = set(valid_cell_ids)
+
+        for item in existing_results:
+            cell_id = item.get("cell_id")
+            if cell_id in valid_ids:
+                merged[cell_id] = item
+
+        for item in next_results:
+            cell_id = item.get("cell_id")
+            if cell_id:
+                merged[cell_id] = item
+
+        ordered_results: list[dict[str, Any]] = []
+        for cell_id in valid_cell_ids:
+            if cell_id in merged:
+                ordered_results.append(merged[cell_id])
+        return ordered_results
 
     def _build_runtime(
         self,
