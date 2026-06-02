@@ -4,6 +4,7 @@ import type { Edge, Node } from 'reactflow'
 import { PipelineBuilder } from '../components/pipeline-builder'
 import { PageHeader, Panel, Select } from '../components/ui'
 import { api } from '../lib/api'
+import { formatDate } from '../lib/utils'
 
 function makeStarterNodes(): Node[] {
   return [
@@ -33,6 +34,7 @@ export function PipelineBuilderPage() {
   const pipelinesQuery = useQuery({ queryKey: ['pipelines'], queryFn: api.listPipelines })
   const filesQuery = useQuery({ queryKey: ['files'], queryFn: api.listFiles })
   const tablesQuery = useQuery({ queryKey: ['tables'], queryFn: api.listTables })
+  const schedulerStatusQuery = useQuery({ queryKey: ['pipelines', 'scheduler-status'], queryFn: api.getPipelineSchedulerStatus, refetchInterval: 15000 })
   const [currentPipelineId, setCurrentPipelineId] = useState<string | null>(null)
   const [pipelineName, setPipelineName] = useState('Sales Curated Pipeline')
   const [pipelineDescription, setPipelineDescription] = useState('Read a raw sales file, transform it with SQL, and publish a curated Delta table.')
@@ -122,6 +124,21 @@ export function PipelineBuilderPage() {
     },
   })
 
+  const runDueSchedulesMutation = useMutation({
+    mutationFn: api.runDuePipelineSchedules,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['pipelines', 'scheduler-status'] })
+      queryClient.invalidateQueries({ queryKey: ['runs'] })
+      queryClient.invalidateQueries({ queryKey: ['logs'] })
+      setStatusMessage(
+        result.triggered.length
+          ? `Triggered ${result.triggered.length} scheduled pipeline run${result.triggered.length === 1 ? '' : 's'} from the scheduler sweep.`
+          : 'Scheduler sweep completed. No pipelines were due at this time.',
+      )
+    },
+    onError: (error: Error) => setStatusMessage(error.message),
+  })
+
   const ensureSaved = async (payload: { name: string; description: string; nodes: Node[]; edges: Edge[] }) => {
     const pipeline = await saveMutation.mutateAsync(payload)
     return pipeline.id
@@ -159,6 +176,78 @@ export function PipelineBuilderPage() {
         <div className="rounded-2xl bg-cyan-50 p-4 text-sm text-lagoon">
           <p className="font-semibold">Current Status</p>
           <p className="mt-2 leading-6">{statusMessage}</p>
+        </div>
+      </Panel>
+
+      <Panel className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Scheduler Runtime</p>
+              <h2 className="font-display text-2xl text-ink">Recurring Pipeline Execution</h2>
+            </div>
+            <button
+              type="button"
+              disabled={runDueSchedulesMutation.isPending}
+              onClick={() => runDueSchedulesMutation.mutate()}
+              className="inline-flex items-center justify-center rounded-lg bg-[#ff3621] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#e52c19] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {runDueSchedulesMutation.isPending ? 'Sweeping...' : 'Run Due Schedules Now'}
+            </button>
+          </div>
+          <p className="text-sm leading-6 text-slate/70">
+            Pipeline cron schedules are now executed by a live backend scheduler loop. Cron expressions are interpreted in{' '}
+            <span className="font-semibold text-ink">{schedulerStatusQuery.data?.timezone ?? 'the configured timezone'}</span>.
+          </p>
+          <div className="grid gap-4 md:grid-cols-4">
+            <div className="rounded-2xl bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate/50">Enabled</p>
+              <p className="mt-2 text-sm font-semibold text-ink">{schedulerStatusQuery.data?.enabled ? 'Yes' : 'No'}</p>
+            </div>
+            <div className="rounded-2xl bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate/50">Running</p>
+              <p className="mt-2 text-sm font-semibold text-ink">{schedulerStatusQuery.data?.running ? 'Active' : 'Stopped'}</p>
+            </div>
+            <div className="rounded-2xl bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate/50">Poll Interval</p>
+              <p className="mt-2 text-sm font-semibold text-ink">{schedulerStatusQuery.data?.poll_interval_seconds ?? 'n/a'} sec</p>
+            </div>
+            <div className="rounded-2xl bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate/50">Managed Pipelines</p>
+              <p className="mt-2 text-sm font-semibold text-ink">{schedulerStatusQuery.data?.managed_pipeline_count ?? 0}</p>
+            </div>
+          </div>
+          {schedulerStatusQuery.data?.last_error ? (
+            <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {schedulerStatusQuery.data.last_error}
+            </div>
+          ) : null}
+        </div>
+        <div className="space-y-3 rounded-2xl bg-slate-50 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Next Due Pipelines</p>
+            <span className="text-xs text-slate/60">
+              Last tick {schedulerStatusQuery.data?.last_tick_at ? formatDate(schedulerStatusQuery.data.last_tick_at) : 'not yet'}
+            </span>
+          </div>
+          {schedulerStatusQuery.data?.last_summary.next_due?.length ? (
+            <div className="space-y-2">
+              {schedulerStatusQuery.data.last_summary.next_due.slice(0, 4).map((item) => (
+                <div key={`${item.pipeline_id}-${item.next_run_at}`} className="rounded-2xl bg-white px-4 py-3 text-sm">
+                  <p className="font-semibold text-ink">{item.pipeline_name}</p>
+                  <p className="mt-1 text-slate/70">{item.cron}</p>
+                  <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate/50">{formatDate(item.next_run_at)}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate/70">No scheduled pipelines are currently registered for the next sweep.</p>
+          )}
+          {schedulerStatusQuery.data?.last_summary.invalid_schedules?.length ? (
+            <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              {schedulerStatusQuery.data.last_summary.invalid_schedules.length} pipeline schedule{schedulerStatusQuery.data.last_summary.invalid_schedules.length === 1 ? '' : 's'} have invalid cron expressions.
+            </div>
+          ) : null}
         </div>
       </Panel>
 

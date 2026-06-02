@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     superset_url: str = "http://localhost:8088"
     superset_username: str = "admin"
     superset_password: str = "admin"
+    scheduler_enabled: bool = True
+    scheduler_poll_interval_seconds: int = 30
+    scheduler_timezone: str = "Asia/Kolkata"
 
 
 @lru_cache

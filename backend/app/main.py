@@ -5,6 +5,7 @@ from app.api.routes import bi, files, pipelines, queries, system, tables
 from app.core.config import get_settings
 from app.db.base import *  # noqa: F403
 from app.db.session import Base, engine
+from app.services.pipeline_scheduler_service import pipeline_scheduler_service
 from app.services.storage import StorageService
 
 
@@ -28,9 +29,15 @@ app.add_middleware(
 
 
 @app.on_event("startup")
-def on_startup() -> None:
+async def on_startup() -> None:
     storage_service.ensure_directories()
     Base.metadata.create_all(bind=engine)
+    await pipeline_scheduler_service.start()
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    await pipeline_scheduler_service.stop()
 
 
 app.include_router(system.router, prefix=settings.api_prefix)

@@ -17,9 +17,12 @@ from app.schemas.pipelines import (
     PipelineRunResponse,
     PipelineUpdateRequest,
     PipelineValidationResponse,
+    SchedulerStatusResponse,
+    SchedulerSweepResponse,
 )
 from app.services.airflow_dag import AirflowDagService
 from app.services.pipeline_service import PipelineService
+from app.services.pipeline_scheduler_service import pipeline_scheduler_service
 
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
@@ -141,6 +144,16 @@ def retry_run(run_id: str, db: Session = Depends(get_db)) -> PipelineRunResponse
     run = pipeline_service.execute_pipeline(db, record, trigger_type="retry", retry_of_run_id=previous_run.id)
     logs = db.query(JobLog).filter(JobLog.pipeline_run_id == run.id).order_by(JobLog.created_at.asc()).all()
     return PipelineRunResponse(run=_to_pipeline_run_read(run, db), logs=logs)
+
+
+@router.get("/scheduler/status", response_model=SchedulerStatusResponse)
+def get_scheduler_status() -> SchedulerStatusResponse:
+    return SchedulerStatusResponse.model_validate(pipeline_scheduler_service.get_status())
+
+
+@router.post("/scheduler/run-due", response_model=SchedulerSweepResponse)
+def run_due_schedules() -> SchedulerSweepResponse:
+    return SchedulerSweepResponse.model_validate(pipeline_scheduler_service.run_due_pipelines_once())
 
 
 @router.get("/runs/all", response_model=PipelineRunListResponse)
