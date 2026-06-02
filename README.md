@@ -1,88 +1,185 @@
-# Internal Lakehouse Platform
+# DataWizz
 
-A demo-ready internal data warehouse / lakehouse platform inspired by Databricks, Snowflake, ClickHouse Cloud, Airflow, Superset, and Metabase.
+<div align="center">
 
-This first version is built as a production-style MVP with:
+**An internal lakehouse, orchestration, and BI workspace for modern analytics teams.**
 
-- React + TypeScript frontend
-- Tailwind-based enterprise UI
-- FastAPI backend
-- DuckDB query execution
-- Delta Lake writes via `delta-rs`
-- PostgreSQL metadata store
-- MinIO-ready object storage configuration
-- Visual pipeline builder with React Flow
-- In-app BI layer for charts and dashboards
+[![Workspace](https://img.shields.io/badge/workspace-available-7c3aed?style=flat-square)](http://localhost:5173)
+[![Backend](https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square)](./backend)
+[![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-2563eb?style=flat-square)](./frontend)
+[![Engine](https://img.shields.io/badge/query%20engine-DuckDB-f59e0b?style=flat-square)](./backend)
+[![Format](https://img.shields.io/badge/table%20format-Delta%20Lake-111827?style=flat-square)](./storage)
 
-## Monorepo Structure
+</div>
 
-```text
-frontend/         React app with dashboard, SQL workspace, catalog, pipelines, and BI pages
-backend/          FastAPI app, services, metadata models, and Alembic migration
-docs/             Architecture, API docs, and demo workflow
-sample_data/      CSV sample files and example pipeline JSON
-storage/          Raw, curated, and temp storage zones
-docker-compose.yml
-```
+DataWizz is a demo-ready internal data platform inspired by Databricks, Snowflake, ClickHouse Cloud, Airflow, Superset, and Metabase. It combines file ingestion, SQL exploration, Delta Lake publishing, low-code orchestration, and business dashboards in one local-first workspace.
 
-## What the MVP Includes
+The current version is intentionally built as a serious MVP rather than a toy demo:
 
-- File upload, list, preview, schema inference, and delete
-- SQL querying over raw files with DuckDB
-- Writing query results to Delta Lake format
-- Catalog page for Delta table discovery and preview
-- Visual pipeline builder with manual save, validate, run, and Airflow DAG export
-- Pipeline runs and log pages
-- BI dataset explorer, chart builder, dashboard builder, dashboard viewer, and report scheduler
-- Docker Compose setup for frontend, backend, PostgreSQL, MinIO, and optional Superset
+- Upload, preview, and profile raw files
+- Query raw and curated data with DuckDB
+- Publish transformed outputs as Delta tables
+- Build and validate visual pipelines
+- Track runs, retries, and logs
+- Create semantic datasets, charts, dashboards, and scheduled reports
+- Run locally with one script or as a Docker demo stack
+
+## Product Tour
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="./docs/screenshots/dashboard.png" alt="DataWizz dashboard" />
+    </td>
+    <td width="50%">
+      <img src="./docs/screenshots/sql-workspace.png" alt="DataWizz SQL workspace" />
+    </td>
+  </tr>
+  <tr>
+    <td><strong>Lakehouse home</strong><br/>Monitor files, Delta assets, pipeline health, and workspace activity from a single landing page.</td>
+    <td><strong>SQL workspace</strong><br/>Query raw files and curated outputs, inspect history, and write results back to Delta Lake.</td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="./docs/screenshots/catalog.png" alt="DataWizz catalog" />
+    </td>
+    <td width="50%">
+      <img src="./docs/screenshots/pipeline-builder.png" alt="DataWizz pipeline builder" />
+    </td>
+  </tr>
+  <tr>
+    <td><strong>Curated catalog</strong><br/>Browse governed Delta assets with ownership, freshness, schema, and preview data.</td>
+    <td><strong>Pipeline builder</strong><br/>Design low-code flows, validate graph rules, schedule recurring runs, and export Airflow-style DAGs.</td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      <img src="./docs/screenshots/dashboard-viewer.png" alt="DataWizz dashboard viewer" />
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2"><strong>BI dashboard layer</strong><br/>Publish chart-driven dashboards and turn curated Delta tables into stakeholder-ready reporting surfaces.</td>
+  </tr>
+</table>
+
+## Why DataWizz
+
+DataWizz is designed for internal analytics engineering and platform demos where you want a believable lakehouse product surface without needing a full distributed stack on day one.
+
+It is especially useful when you want to demonstrate:
+
+- Raw-to-curated data workflows
+- SQL-first transformation on local or object-backed files
+- Delta Lake publishing with metadata tracking
+- Airflow-like orchestration without leaving the app
+- In-app BI dashboards on top of curated outputs
+
+## Core Capabilities
+
+### Lakehouse
+
+- File upload, preview, schema inference, and deletion
+- SQL querying over CSV, JSON, Parquet, and curated Delta tables
+- Write query outputs to Delta Lake with append or overwrite modes
+- Catalog browsing with metadata, freshness, ownership, tags, and lineage hints
+
+### Orchestration
+
+- Visual pipeline builder powered by React Flow
+- File source, Delta source, filter, select, join, aggregate, SQL, validate, write, and schedule nodes
+- DAG validation, node guardrails, run history, retries, and detailed logs
+- Airflow DAG code generation and export
+- Backend recurring scheduler for saved cron pipelines
+
+### BI Layer
+
+- Semantic dataset explorer
+- Dataset-driven chart builder
+- Saved chart library with traceability into dashboards and report schedules
+- Dashboard builder and dashboard viewer
+- Report scheduler with stored artifacts and snapshot history
+- Optional Superset integration surface for demo storytelling
 
 ## Architecture
 
-See [docs/architecture.md](/Users/dubeyroh/Library/CloudStorage/OneDrive-TheStarsGroup/Desktop/DataWizz/docs/architecture.md).
+See the deeper system walkthrough in [docs/architecture.md](./docs/architecture.md).
 
-## Local Development
+At a high level:
 
-### One Command Startup
+```text
+Users
+  -> React + TypeScript frontend
+  -> FastAPI application layer
+  -> DuckDB execution services
+  -> Delta Lake curated storage
+  -> PostgreSQL metadata store
+  -> Optional MinIO object storage
+```
 
-From `/Users/dubeyroh/Library/CloudStorage/OneDrive-TheStarsGroup/Desktop/DataWizz`:
+Project layout:
+
+```text
+frontend/           React app for the workspace UI
+backend/            FastAPI APIs, services, models, and migrations
+docs/               Architecture, API, demo workflow, and screenshots
+sample_data/        CSV fixtures and sample pipeline JSON
+storage/            raw/, curated/, and temp/ runtime zones
+docker-compose.yml  Demo stack for frontend, backend, PostgreSQL, MinIO, Superset
+run.sh              One-command local launcher
+```
+
+## Quick Start
+
+### One command
+
+From the project root:
 
 ```bash
 ./run.sh
 ```
 
-Behavior:
+This launcher:
 
-- Uses Docker Compose if `docker` is installed
-- Falls back to local demo mode if Docker is not installed
-- Local demo mode starts:
-  - backend on `http://localhost:8000`
-  - frontend on `http://localhost:5173`
-  - backend storage/metadata with SQLite for convenience
-- If ports `8000` or `5173` are already occupied, the script automatically stops the stale listener processes before starting
+- Reuses healthy local frontend and backend processes when they are already running
+- Starts the app in local demo mode when Docker is unavailable
+- Supports a Docker-based stack when Docker is installed
 
-Other options:
+Local endpoints:
+
+- App: `http://localhost:5173`
+- API: `http://localhost:8000`
+- API docs: `http://localhost:8000/docs`
+
+Demo credentials:
+
+- Email: `admin@datawizz.local`
+- Password: `datawizz123`
+
+### Other launcher modes
 
 ```bash
+./run.sh local
+./run.sh local --restart
 ./run.sh docker
 ./run.sh docker superset
-./run.sh local
 ```
+
+## Local Development
 
 ### Backend
 
 ```bash
 cd backend
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 cp .env.example .env
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Note:
+Notes:
 
-- The backend expects PostgreSQL by default.
-- For local smoke testing without PostgreSQL, you can override `DATABASE_URL=sqlite:///./local.db`.
+- The backend targets PostgreSQL by default.
+- For quick local demos, the launcher can use SQLite-backed metadata automatically.
 
 ### Frontend
 
@@ -93,24 +190,19 @@ cp .env.example .env
 npm run dev
 ```
 
-Frontend dev server default: `http://localhost:5173`
-
-## Docker Demo Setup
-
-The current environment where this project was generated does not have Docker installed, so the compose stack could not be executed here. The configuration is included for local use.
+## Docker Demo Stack
 
 ```bash
 docker compose up --build
 ```
 
-Services:
+Included services:
 
-- Frontend: `http://localhost:3000`
-- Backend API: `http://localhost:8000`
-- FastAPI docs: `http://localhost:8000/docs`
-- PostgreSQL: `localhost:5432`
-- MinIO API: `http://localhost:9000`
-- MinIO Console: `http://localhost:9001`
+- Frontend
+- FastAPI backend
+- PostgreSQL
+- MinIO
+- Optional Superset profile
 
 Optional Superset:
 
@@ -118,25 +210,20 @@ Optional Superset:
 docker compose --profile superset up --build
 ```
 
-Superset: `http://localhost:8088`
+## Demo Flow
 
-## Demo Walkthrough
+For a complete scripted walkthrough, see [docs/demo-workflow.md](./docs/demo-workflow.md).
 
-See [docs/demo-workflow.md](/Users/dubeyroh/Library/CloudStorage/OneDrive-TheStarsGroup/Desktop/DataWizz/docs/demo-workflow.md).
+Suggested first demo:
 
-Recommended first demo:
+1. Upload `sample_data/sales.csv` and `sample_data/customers.csv`
+2. Query `raw_sales` in the SQL workspace
+3. Write `sales_curated` as a Delta table
+4. Open the catalog and inspect the curated asset
+5. Run the sample visual pipeline
+6. Build charts and review the published BI dashboard
 
-1. Upload `sample_data/sales.csv` and `sample_data/customers.csv`.
-2. Run SQL against `raw_sales`.
-3. Write `sales_curated` as a Delta table.
-4. Validate and run a visual pipeline.
-5. Create charts and assemble a `Sales Analytics Dashboard`.
-
-## API Documentation
-
-See [docs/api.md](/Users/dubeyroh/Library/CloudStorage/OneDrive-TheStarsGroup/Desktop/DataWizz/docs/api.md).
-
-## Sample Queries
+## Sample SQL
 
 Regional revenue:
 
@@ -172,51 +259,47 @@ ORDER BY total_revenue DESC
 LIMIT 10;
 ```
 
-## Verification Performed
+## Documentation
+
+- [Architecture](./docs/architecture.md)
+- [API documentation](./docs/api.md)
+- [Demo workflow](./docs/demo-workflow.md)
+
+## Verification
+
+This repo has been locally verified with:
 
 - `python3 -m compileall backend/app backend/alembic`
-- Frontend production build with `npm run build`
-- Backend dependency installation with `pip install -e '.[dev]'`
-- Backend runtime smoke test with SQLite against:
-  - `GET /health`
-  - `GET /api/system/settings`
+- `npm run build`
+- backend smoke checks for file upload, SQL execution, Delta writes, pipelines, BI flows, and report scheduling
 
-## Known MVP Notes
+## Current MVP Notes
 
-- The SQL workspace expects generated view names such as `raw_sales` based on uploaded filenames.
-- Pipeline node configuration is currently edited as JSON in the side panel for speed and flexibility.
-- The in-app BI layer is intentionally lightweight and SQL-driven; Superset is the richer optional external BI path.
-- Docker configuration is provided, but not executed in this environment because Docker is unavailable here.
+- DuckDB is the current primary query engine
+- Delta publishing is implemented through the backend write services
+- Scheduling is now active in-app for saved cron pipelines
+- The BI layer is intentionally lightweight and app-native; Superset remains the richer external optional path
 
-## Future Enhancements
+## Roadmap
 
-### Core Platform TODOs
+### Platform
 
-- Authentication and RBAC
-- Apache Spark execution engine
-- Apache Flink streaming pipelines
-- Data quality checks using Great Expectations
-- Lineage using OpenLineage
-- Data catalog using Hive Metastore or Nessie
-- Query optimization layer
-- Multi-user workspace
-- Git-based pipeline versioning
-- CI/CD deployment
-- Kubernetes deployment
-- Real Airflow integration
-- Monitoring with Prometheus and Grafana
+- Authentication and RBAC hardening
+- Spark execution engine
+- Flink streaming support
+- Great Expectations quality checks
+- OpenLineage integration
+- Hive Metastore or Nessie-backed catalog options
+- CI/CD, monitoring, and Kubernetes deployment
 
-### BI and Reporting TODOs
+### BI and Analytics
 
-- Natural language to chart generation
-- Dashboard sharing
-- Public/private dashboards
-- Row-level security
-- Column-level masking
-- Embedded analytics
-- Semantic layer similar to Cube.dev
-- Metrics layer similar to dbt Semantic Layer
-- Alerts on KPI thresholds
-- Dashboard versioning
-- Git-backed dashboard definitions
-- PDF email subscriptions
+- Natural-language chart generation
+- Dashboard sharing and permissions
+- Row-level security and column masking
+- Semantic metrics layer
+- Alerts, subscriptions, and richer export delivery
+
+---
+
+DataWizz is built to show what a modern internal analytics platform can look like when lakehouse workflows, orchestration, and BI are treated as one cohesive product surface.
