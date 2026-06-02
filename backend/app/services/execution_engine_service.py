@@ -163,12 +163,12 @@ class ExecutionEngineService:
             "available": datafusion_installed,
             "status": "available" if datafusion_installed else "not_installed",
             "summary": "Arrow-native Python notebook runtime for SQL and dataframe experiments.",
-            "description": "Experimental notebook surface for Apache DataFusion when the Python runtime is installed locally.",
+            "description": "Arrow-native notebook runtime for SQL and dataframe workflows. Raw sources and curated Delta tables are registered automatically for local execution.",
             "availability_reason": None if datafusion_installed else "The Python DataFusion runtime is not installed. Install the datafusion package to enable live notebook execution.",
             "supports_sql": True,
             "supports_python": True,
-            "supports_delta_read": False,
-            "supports_delta_write": False,
+            "supports_delta_read": datafusion_installed,
+            "supports_delta_write": datafusion_installed,
             "supports_local_files": True,
             "notebook_ready": datafusion_installed,
             "sample_code": (
@@ -269,6 +269,8 @@ class ExecutionEngineService:
             path = file_record.storage_path
             if file_record.file_type == "csv":
                 ctx.register_csv(view_name, path)
+            elif file_record.file_type == "json":
+                ctx.register_json(view_name, path)
             elif file_record.file_type == "parquet":
                 ctx.register_parquet(view_name, path)
             else:
@@ -277,9 +279,9 @@ class ExecutionEngineService:
                 )
 
         for table_record in delta_tables:
-            warnings.append(
-                f"Curated Delta table '{table_record.name}' was not auto-registered for DataFusion in the current runtime."
-            )
+            view_name = slugify_identifier(table_record.name)
+            arrow_table = DeltaLakeTable(table_record.storage_path).to_pyarrow_table()
+            ctx.register_record_batches(view_name, [arrow_table.to_batches()])
 
         namespace = {
             "ctx": ctx,
