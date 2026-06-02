@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { DataTable } from '../components/data-table'
 import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, StatCard, Textarea } from '../components/ui'
 import { api } from '../lib/api'
+import { useTheme } from '../theme/theme-context'
 import { formatDate } from '../lib/utils'
 
 function freshnessTone(status?: string) {
@@ -14,6 +15,7 @@ function freshnessTone(status?: string) {
 }
 
 export function CatalogPage() {
+  const { theme } = useTheme()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
@@ -188,7 +190,13 @@ export function CatalogPage() {
                         type="button"
                         onClick={() => setSelectedTableId(table.id)}
                         className={`w-full rounded-2xl border p-4 text-left transition ${
-                          selectedTableId === table.id ? 'border-lagoon bg-cyan-50/80 shadow-sm' : 'border-slate-100 bg-slate-50/80'
+                          selectedTableId === table.id
+                            ? theme === 'dark'
+                              ? 'border-[#f6f24a]/30 bg-[#f6f24a]/12 shadow-[0_0_0_1px_rgba(246,242,74,0.06)]'
+                              : 'border-lagoon bg-cyan-50/80 shadow-sm'
+                            : theme === 'dark'
+                              ? 'border-white/10 bg-white/[0.03]'
+                              : 'border-slate-100 bg-slate-50/80'
                         }`}
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -196,7 +204,11 @@ export function CatalogPage() {
                             <p className="font-semibold text-ink">{table.name}</p>
                             <p className="mt-1 text-sm text-slate/70">{table.description || 'No catalog description yet.'}</p>
                           </div>
-                          <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate/60">
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
+                              theme === 'dark' ? 'bg-white/10 text-white/72' : 'bg-white text-slate/60'
+                            }`}
+                          >
                             {table.mode}
                           </span>
                         </div>
@@ -204,9 +216,13 @@ export function CatalogPage() {
                           <span className={`rounded-full px-3 py-1 text-xs font-medium ${freshnessTone(table.freshness_status)}`}>
                             {table.freshness_status || 'unknown'}
                           </span>
-                          {table.owner ? <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700">{table.owner}</span> : null}
+                          {table.owner ? (
+                            <span className={`rounded-full px-3 py-1 text-xs font-medium ${theme === 'dark' ? 'bg-white/10 text-white/80' : 'bg-white text-slate-700'}`}>
+                              {table.owner}
+                            </span>
+                          ) : null}
                         </div>
-                        <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate/60">
+                        <div className={`mt-4 flex flex-wrap gap-2 text-xs ${theme === 'dark' ? 'text-white/55' : 'text-slate/60'}`}>
                           <span>{table.row_count ?? 0} rows</span>
                           <span>•</span>
                           <span>{table.schema_json?.length ?? 0} columns</span>
