@@ -162,6 +162,31 @@ export type Chart = {
   updated_at: string
 }
 
+export type ChartTraceability = {
+  chart: Chart
+  widget_count: number
+  dashboard_count: number
+  report_schedule_count: number
+  dashboards: {
+    dashboard_id: string
+    dashboard_name: string
+    dashboard_description?: string
+    widget_id: string
+    widget_title: string
+    widget_type: string
+    updated_at: string
+  }[]
+  report_schedules: {
+    schedule_id: string
+    schedule_name: string
+    dashboard_id?: string
+    dashboard_name?: string
+    frequency: string
+    destination: string
+    updated_at: string
+  }[]
+}
+
 export type Dashboard = {
   id: string
   name: string

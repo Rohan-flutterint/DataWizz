@@ -112,6 +112,62 @@ class BiService:
             "row_count": result["row_count"],
         }
 
+    def get_chart_traceability(self, db: Session, chart_id: str) -> dict:
+        chart = db.query(Chart).filter(Chart.id == chart_id).one_or_none()
+        if chart is None:
+            raise ValueError("Chart not found")
+
+        widgets = db.query(DashboardWidget).filter(DashboardWidget.chart_id == chart_id).order_by(DashboardWidget.created_at.asc()).all()
+        dashboards = []
+        dashboard_ids: list[str] = []
+        for widget in widgets:
+            dashboard = db.query(Dashboard).filter(Dashboard.id == widget.dashboard_id).one_or_none()
+            if dashboard is None:
+                continue
+            dashboard_ids.append(dashboard.id)
+            dashboards.append(
+                {
+                    "dashboard_id": dashboard.id,
+                    "dashboard_name": dashboard.name,
+                    "dashboard_description": dashboard.description,
+                    "widget_id": widget.id,
+                    "widget_title": widget.title,
+                    "widget_type": widget.widget_type,
+                    "updated_at": dashboard.updated_at.isoformat(),
+                }
+            )
+
+        unique_dashboard_ids = list(dict.fromkeys(dashboard_ids))
+        schedules = []
+        if unique_dashboard_ids:
+            for schedule in (
+                db.query(ReportSchedule)
+                .filter(ReportSchedule.dashboard_id.in_(unique_dashboard_ids))
+                .order_by(ReportSchedule.updated_at.desc())
+                .all()
+            ):
+                dashboard = next((item for item in dashboards if item["dashboard_id"] == schedule.dashboard_id), None)
+                schedules.append(
+                    {
+                        "schedule_id": schedule.id,
+                        "schedule_name": schedule.name,
+                        "dashboard_id": schedule.dashboard_id,
+                        "dashboard_name": dashboard["dashboard_name"] if dashboard else None,
+                        "frequency": schedule.frequency,
+                        "destination": schedule.destination,
+                        "updated_at": schedule.updated_at.isoformat(),
+                    }
+                )
+
+        return {
+            "chart": chart,
+            "widget_count": len(widgets),
+            "dashboard_count": len(unique_dashboard_ids),
+            "report_schedule_count": len(schedules),
+            "dashboards": dashboards,
+            "report_schedules": schedules,
+        }
+
     def list_dashboard_widgets(self, db: Session, dashboard_id: str) -> list[DashboardWidget]:
         return db.query(DashboardWidget).filter(DashboardWidget.dashboard_id == dashboard_id).order_by(DashboardWidget.created_at.asc()).all()
 

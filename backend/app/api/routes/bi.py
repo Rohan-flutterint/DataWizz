@@ -13,6 +13,7 @@ from app.schemas.bi import (
     ChartListResponse,
     ChartCreateRequest,
     ChartRead,
+    ChartTraceabilityResponse,
     ChartPreviewResponse,
     ChartUpdateRequest,
     DashboardListResponse,
@@ -128,6 +129,15 @@ def update_chart(chart_id: str, payload: ChartUpdateRequest, db: Session = Depen
     db.commit()
     db.refresh(record)
     return record
+
+
+@router.get("/charts/{chart_id}/traceability", response_model=ChartTraceabilityResponse)
+def get_chart_traceability(chart_id: str, db: Session = Depends(get_db)) -> ChartTraceabilityResponse:
+    try:
+        payload = bi_service.get_chart_traceability(db, chart_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ChartTraceabilityResponse.model_validate(payload)
 
 
 @router.delete("/charts/{chart_id}", response_model=ApiMessage)

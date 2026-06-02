@@ -259,5 +259,34 @@ class ChartListResponse(BaseModel):
     items: list[ChartRead]
 
 
+class ChartTraceabilityDashboardRead(BaseModel):
+    dashboard_id: str
+    dashboard_name: str
+    dashboard_description: str | None = None
+    widget_id: str
+    widget_title: str
+    widget_type: str
+    updated_at: str
+
+
+class ChartTraceabilityReportScheduleRead(BaseModel):
+    schedule_id: str
+    schedule_name: str
+    dashboard_id: str | None = None
+    dashboard_name: str | None = None
+    frequency: str
+    destination: str
+    updated_at: str
+
+
+class ChartTraceabilityResponse(BaseModel):
+    chart: ChartRead
+    widget_count: int
+    dashboard_count: int
+    report_schedule_count: int
+    dashboards: list[ChartTraceabilityDashboardRead] = Field(default_factory=list)
+    report_schedules: list[ChartTraceabilityReportScheduleRead] = Field(default_factory=list)
+
+
 class DashboardListResponse(BaseModel):
     items: list[DashboardRead]

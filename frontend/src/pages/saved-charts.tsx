@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChartRenderer } from '../components/chart-renderer'
 import { DataTable } from '../components/data-table'
 import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
@@ -8,6 +8,7 @@ import { api } from '../lib/api'
 import { formatDate } from '../lib/utils'
 
 export function SavedChartsPage() {
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const chartsQuery = useQuery({ queryKey: ['bi', 'charts'], queryFn: api.listCharts })
@@ -80,6 +81,11 @@ export function SavedChartsPage() {
     queryKey: ['bi', 'charts', 'preview', selectedChartId],
     queryFn: () => api.previewChart({ sql: selectedChart!.query_sql, limit: 200 }),
     enabled: Boolean(selectedChart),
+  })
+  const traceabilityQuery = useQuery({
+    queryKey: ['bi', 'charts', selectedChartId, 'traceability'],
+    queryFn: () => api.getChartTraceability(selectedChartId!),
+    enabled: Boolean(selectedChartId),
   })
 
   useEffect(() => {
@@ -266,6 +272,24 @@ export function SavedChartsPage() {
                     </div>
                   </div>
 
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div className="rounded-2xl bg-cyan-50 p-4 text-lagoon">
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-lagoon/70">Dashboard Usage</p>
+                      <p className="mt-2 font-display text-2xl">{traceabilityQuery.data?.dashboard_count ?? 0}</p>
+                      <p className="mt-2 text-sm">Dashboards currently embedding this chart.</p>
+                    </div>
+                    <div className="rounded-2xl bg-emerald-50 p-4 text-emerald-700">
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700/70">Widget Placements</p>
+                      <p className="mt-2 font-display text-2xl">{traceabilityQuery.data?.widget_count ?? 0}</p>
+                      <p className="mt-2 text-sm">Widget slots inheriting this chart definition.</p>
+                    </div>
+                    <div className="rounded-2xl bg-orange-50 p-4 text-orange-700">
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-orange-700/70">Scheduled Reports</p>
+                      <p className="mt-2 font-display text-2xl">{traceabilityQuery.data?.report_schedule_count ?? 0}</p>
+                      <p className="mt-2 text-sm">Report schedules downstream of those dashboards.</p>
+                    </div>
+                  </div>
+
                   <div className="flex flex-wrap gap-2">
                     {selectedConfig.dimensionKey ? (
                       <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-medium text-lagoon">
@@ -404,6 +428,64 @@ export function SavedChartsPage() {
 
                 <div className="grid gap-5 xl:grid-cols-[0.95fr_minmax(0,1.05fr)]">
                   <div className="space-y-4">
+                    <Panel className="space-y-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Traceability</p>
+                          <h3 className="mt-2 font-display text-2xl text-ink">Dashboard Lineage</h3>
+                        </div>
+                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate/70">
+                          {traceabilityQuery.data?.dashboard_count ?? 0} dashboards
+                        </span>
+                      </div>
+
+                      {traceabilityQuery.data?.dashboards?.length ? (
+                        <div className="space-y-3">
+                          {traceabilityQuery.data.dashboards.map((usage) => (
+                            <div key={usage.widget_id} className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+                              <div className="flex items-start justify-between gap-4">
+                                <div>
+                                  <p className="font-semibold text-ink">{usage.dashboard_name}</p>
+                                  <p className="mt-2 text-sm text-slate/70">{usage.dashboard_description || 'No dashboard description yet.'}</p>
+                                </div>
+                                <Button tone="ghost" className="shrink-0" onClick={() => navigate(`/bi/dashboards?dashboardId=${encodeURIComponent(usage.dashboard_id)}`)}>
+                                  Open Dashboard
+                                </Button>
+                              </div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700">Widget: {usage.widget_title}</span>
+                                <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700">Type: {usage.widget_type}</span>
+                              </div>
+                              <p className="mt-3 text-xs uppercase tracking-[0.18em] text-slate/50">Updated {formatDate(usage.updated_at)}</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate/70">
+                          This chart is not embedded into any dashboard yet.
+                        </div>
+                      )}
+
+                      <div className="border-t border-slate-100 pt-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Downstream Scheduled Reports</p>
+                        {traceabilityQuery.data?.report_schedules?.length ? (
+                          <div className="mt-3 space-y-3">
+                            {traceabilityQuery.data.report_schedules.map((schedule) => (
+                              <div key={schedule.schedule_id} className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                                <p className="font-semibold">{schedule.schedule_name}</p>
+                                <p className="mt-2">
+                                  {schedule.dashboard_name || 'Unknown dashboard'} • {schedule.frequency} • {schedule.destination}
+                                </p>
+                                <p className="mt-2 text-xs uppercase tracking-[0.18em] text-amber-700/70">Updated {formatDate(schedule.updated_at)}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-3 text-sm text-slate/70">No report schedules currently depend on dashboards that use this chart.</p>
+                        )}
+                      </div>
+                    </Panel>
+
                     <ChartRenderer
                       chartType={selectedChart.chart_type}
                       rows={previewQuery.data?.rows ?? []}
