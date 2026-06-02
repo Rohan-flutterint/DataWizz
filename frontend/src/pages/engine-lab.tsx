@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Clock3, Copy, Cpu, DatabaseZap, FileCode2, PencilLine, Play, Plus, SkipForward, Trash2 } from 'lucide-react'
+import { ArrowRightLeft, Clock3, Copy, Cpu, DatabaseZap, FileCode2, PencilLine, Play, Plus, SkipForward, Sparkles, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { DataTable } from '../components/data-table'
 import { MonacoSqlEditor } from '../components/monaco-sql-editor'
-import { Button, Input, Label, PageHeader, Panel, Textarea } from '../components/ui'
+import { Button, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
 import { useExecutionEngine } from '../engine/engine-context'
 import { api } from '../lib/api'
 import { cn, formatDate } from '../lib/utils'
 import { useTheme } from '../theme/theme-context'
-import type { ExecutionEngine, NotebookCell, NotebookCellRunResult, NotebookDocument } from '../types'
+import type { DeltaTable, ExecutionEngine, NotebookCell, NotebookCellRunResult, NotebookDocument, UploadedFile } from '../types'
 
 function capabilityPill(enabled: boolean, label: string, theme: 'light' | 'dark') {
   return (
@@ -35,6 +35,36 @@ function createCell(code = '', title?: string): NotebookCell {
   return { id: cellId, title, code }
 }
 
+function toRawViewName(fileName: string) {
+  return `raw_${fileName.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '')}`
+}
+
+function toQualifiedTableName(table: DeltaTable) {
+  return table.schema_name ? `${table.schema_name}.${table.name}` : table.name
+}
+
+function buildNotebookSqlSnippet(sourceName: string, mode: 'preview' | 'count') {
+  if (mode === 'count') {
+    return `SELECT COUNT(*) AS row_count\nFROM ${sourceName}`
+  }
+  return `SELECT *\nFROM ${sourceName}\nLIMIT 25`
+}
+
+function buildNotebookPythonSnippet(engineId: string, sourceName: string, mode: 'preview' | 'count') {
+  const sql = buildNotebookSqlSnippet(sourceName, mode)
+  if (engineId === 'spark') {
+    return `result = spark.sql("""\n${sql}\n""")\nresult.show(25, truncate=False)`
+  }
+  return `result = ctx.sql("""\n${sql}\n""")\nprint("Query prepared in DataFusion")`
+}
+
+function buildWriteDeltaHelperSnippet(engineId: string) {
+  if (engineId === 'duckdb') {
+    return `SELECT *\nFROM sales_curated\nLIMIT 25`
+  }
+  return `write_info = write_delta(\n    result=result,\n    table_name="curated_notebook_output",\n    mode="overwrite",\n)\nprint(write_info["table"]["name"])`
+}
+
 function buildDefaultNotebook(engine: ExecutionEngine | null): NotebookDocument | null {
   if (!engine) return null
   return {
@@ -59,6 +89,7 @@ export function EngineLabPage() {
   const [runFeedback, setRunFeedback] = useState<string | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
   const [cellActionState, setCellActionState] = useState<{ cellId: string; mode: 'single' | 'from_here' } | null>(null)
+  const [assetTargetCellId, setAssetTargetCellId] = useState<string>('new')
 
   const engineCatalogQuery = useQuery({ queryKey: ['execution-engines'], queryFn: api.listExecutionEngines })
   const notebooksQuery = useQuery({ queryKey: ['notebooks'], queryFn: api.listNotebooks })
@@ -102,6 +133,18 @@ export function EngineLabPage() {
     setCellResults(nextResults)
   }, [notebookDetailQuery.data, setActiveEngineId])
 
+  useEffect(() => {
+    if (!draftNotebook?.cells_json?.length) {
+      setAssetTargetCellId('new')
+      return
+    }
+    if (assetTargetCellId === 'new') return
+    const targetExists = draftNotebook.cells_json.some((cell) => cell.id === assetTargetCellId)
+    if (!targetExists) {
+      setAssetTargetCellId(draftNotebook.cells_json[0].id)
+    }
+  }, [assetTargetCellId, draftNotebook])
+
   const createNotebookMutation = useMutation({
     mutationFn: api.createNotebook,
   })
@@ -128,6 +171,9 @@ export function EngineLabPage() {
 
   const activeNotebook = draftNotebook
   const hasSelectedNotebook = Boolean(selectedNotebookId)
+  const targetableCells = activeNotebook?.cells_json ?? []
+  const rawAssets = filesQuery.data?.items ?? []
+  const curatedAssets = tablesQuery.data?.items ?? []
 
   const resetNotebookDraft = (engineOverride?: ExecutionEngine | null) => {
     setSelectedNotebookId(null)
@@ -135,6 +181,7 @@ export function EngineLabPage() {
     setRunFeedback(null)
     setRunError(null)
     setDraftNotebook(buildDefaultNotebook(engineOverride ?? selectedEngine))
+    setAssetTargetCellId('new')
   }
 
   const persistNotebook = async () => {
@@ -191,6 +238,42 @@ export function EngineLabPage() {
     } catch (error) {
       setRunError((error as Error).message)
     }
+  }
+
+  const insertSnippetIntoNotebook = (snippet: string, title: string) => {
+    setRunError(null)
+    setRunFeedback(null)
+    setDraftNotebook((current) => {
+      if (!current) return current
+      if (assetTargetCellId === 'new' || !current.cells_json.some((cell) => cell.id === assetTargetCellId)) {
+        const nextCell = createCell(snippet, title)
+        setAssetTargetCellId(nextCell.id)
+        setRunFeedback(`Inserted ${title} into a new notebook cell.`)
+        return {
+          ...current,
+          cells_json: [...current.cells_json, nextCell],
+        }
+      }
+      const target = current.cells_json.find((cell) => cell.id === assetTargetCellId)
+      const nextCode = target?.code?.trim() ? `${target.code.trim()}\n\n${snippet}` : snippet
+      setRunFeedback(`Inserted ${title} into ${target?.title || 'the selected cell'}.`)
+      return {
+        ...current,
+        cells_json: current.cells_json.map((cell) => (cell.id === assetTargetCellId ? { ...cell, code: nextCode } : cell)),
+      }
+    })
+  }
+
+  const insertSourceSnippet = (sourceName: string, label: string, mode: 'preview' | 'count') => {
+    const snippet =
+      selectedEngine?.runtime_language === 'python'
+        ? buildNotebookPythonSnippet(activeEngineId, sourceName, mode)
+        : buildNotebookSqlSnippet(sourceName, mode)
+    insertSnippetIntoNotebook(snippet, `${label} ${mode === 'preview' ? 'preview' : 'row count'} snippet`)
+  }
+
+  const insertHelperSnippet = (title: string, snippet: string) => {
+    insertSnippetIntoNotebook(snippet, title)
   }
 
   const handleRunNotebook = async () => {
@@ -594,25 +677,65 @@ export function EngineLabPage() {
           <Panel>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Registered Sources</p>
-                <h3 className="mt-2 font-display text-2xl text-ink">Lakehouse context</h3>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Notebook Asset Browser</p>
+                <h3 className="mt-2 font-display text-2xl text-ink">Insert source-aware snippets</h3>
               </div>
               <div className={cn('rounded-full px-3 py-1 text-xs font-semibold', theme === 'dark' ? 'bg-white/5 text-white/60' : 'bg-slate-100 text-slate/70')}>
-                {filesQuery.data?.items?.length ?? 0} raw · {tablesQuery.data?.items?.length ?? 0} curated
+                {rawAssets.length} raw · {curatedAssets.length} curated
               </div>
             </div>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="mt-4 grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+              <div className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-white/[0.03]' : 'border-slate-200 bg-slate-50')}>
+                <div className="flex items-center gap-2">
+                  <ArrowRightLeft className={cn('h-4 w-4', theme === 'dark' ? 'text-white/50' : 'text-slate-500')} />
+                  <p className="font-semibold text-ink">Insertion Target</p>
+                </div>
+                <p className="mt-2 text-sm text-slate/75">Choose whether new notebook snippets should land in a specific existing cell or create a fresh cell automatically.</p>
+                <div className="mt-4">
+                  <Label>Target cell</Label>
+                  <Select value={assetTargetCellId} onChange={(event) => setAssetTargetCellId(event.target.value)}>
+                    <option value="new">Create a new cell</option>
+                    {targetableCells.map((cell, index) => (
+                      <option key={cell.id} value={cell.id}>
+                        {cell.title?.trim() || `Cell ${index + 1}`}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="mt-4 rounded-2xl border border-dashed px-4 py-3 text-sm text-slate/70" style={theme === 'dark' ? { borderColor: 'rgba(255,255,255,0.1)' } : undefined}>
+                  Snippets are engine-aware for {selectedEngine?.label ?? 'the selected runtime'}. SQL cells get plain SQL, while Spark and DataFusion notebooks get runnable Python helpers.
+                </div>
+              </div>
               <div className={cn('rounded-2xl p-4', theme === 'dark' ? 'bg-white/[0.03]' : 'bg-slate-50')}>
                 <div className="flex items-center gap-2">
                   <FileCode2 className={cn('h-4 w-4', theme === 'dark' ? 'text-white/50' : 'text-slate-500')} />
                   <p className="font-semibold text-ink">Raw Views</p>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {filesQuery.data?.items?.length ? filesQuery.data.items.map((file) => (
-                    <span key={file.id} className={cn('rounded-full px-3 py-1 text-xs font-medium', theme === 'dark' ? 'bg-white/10 text-white/75' : 'bg-slate-200 text-slate-700')}>
-                      raw_{file.name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '')}
-                    </span>
-                  )) : <p className="text-sm text-slate/75">Upload a file to expose a raw notebook view.</p>}
+                <div className="mt-3 space-y-3">
+                  {rawAssets.length ? rawAssets.map((file: UploadedFile) => {
+                    const sourceName = toRawViewName(file.name)
+                    return (
+                      <div key={file.id} className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-white')}>
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="font-semibold text-ink">{sourceName}</p>
+                            <p className="mt-1 text-sm text-slate/75">{file.name} · {file.file_type.toUpperCase()} · {file.row_count ?? 'unknown'} rows</p>
+                          </div>
+                          <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em]', theme === 'dark' ? 'bg-white/5 text-white/60' : 'bg-slate-100 text-slate-500')}>
+                            raw
+                          </span>
+                        </div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <Button tone="ghost" onClick={() => insertSourceSnippet(sourceName, sourceName, 'preview')}>
+                            Insert Preview
+                          </Button>
+                          <Button tone="ghost" onClick={() => insertSourceSnippet(sourceName, sourceName, 'count')}>
+                            Insert Count
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  }) : <p className="text-sm text-slate/75">Upload a file to expose a raw notebook view.</p>}
                 </div>
               </div>
               <div className={cn('rounded-2xl p-4', theme === 'dark' ? 'bg-white/[0.03]' : 'bg-slate-50')}>
@@ -620,12 +743,65 @@ export function EngineLabPage() {
                   <DatabaseZap className={cn('h-4 w-4', theme === 'dark' ? 'text-white/50' : 'text-slate-500')} />
                   <p className="font-semibold text-ink">Curated Tables</p>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {tablesQuery.data?.items?.length ? tablesQuery.data.items.map((table) => (
-                    <span key={table.id} className={cn('rounded-full px-3 py-1 text-xs font-medium', theme === 'dark' ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-100 text-lagoon')}>
-                      {table.name}
-                    </span>
-                  )) : <p className="text-sm text-slate/75">Curated Delta outputs will appear here after a write.</p>}
+                <div className="mt-3 space-y-3">
+                  {curatedAssets.length ? curatedAssets.map((table: DeltaTable) => {
+                    const sourceName = toQualifiedTableName(table)
+                    return (
+                      <div key={table.id} className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-white')}>
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="font-semibold text-ink">{sourceName}</p>
+                            <p className="mt-1 text-sm text-slate/75">{table.row_count ?? 'unknown'} rows · {table.mode} · {table.storage_path}</p>
+                          </div>
+                          <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em]', theme === 'dark' ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-100 text-lagoon')}>
+                            delta
+                          </span>
+                        </div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <Button tone="ghost" onClick={() => insertSourceSnippet(sourceName, sourceName, 'preview')}>
+                            Insert Preview
+                          </Button>
+                          <Button tone="ghost" onClick={() => insertSourceSnippet(sourceName, sourceName, 'count')}>
+                            Insert Count
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  }) : <p className="text-sm text-slate/75">Curated Delta outputs will appear here after a write.</p>}
+                </div>
+              </div>
+              <div className={cn('rounded-2xl p-4 lg:col-span-2', theme === 'dark' ? 'bg-white/[0.03]' : 'bg-slate-50')}>
+                <div className="flex items-center gap-2">
+                  <Sparkles className={cn('h-4 w-4', theme === 'dark' ? 'text-white/50' : 'text-slate-500')} />
+                  <p className="font-semibold text-ink">Notebook Helpers</p>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <button
+                    type="button"
+                    className={cn('rounded-2xl border p-4 text-left transition', theme === 'dark' ? 'border-white/10 bg-black/20 hover:border-white/20' : 'border-slate-200 bg-white hover:border-slate-300')}
+                    onClick={() => insertHelperSnippet('Revenue by region helper', selectedEngine?.sample_code ?? '')}
+                  >
+                    <p className="font-semibold text-ink">Insert Engine Sample</p>
+                    <p className="mt-2 text-sm text-slate/75">Drop the runtime’s starter pattern into your notebook with one click.</p>
+                  </button>
+                  <button
+                    type="button"
+                    className={cn('rounded-2xl border p-4 text-left transition', theme === 'dark' ? 'border-white/10 bg-black/20 hover:border-white/20' : 'border-slate-200 bg-white hover:border-slate-300')}
+                    onClick={() => insertHelperSnippet('Join template helper', selectedEngine?.runtime_language === 'python'
+                      ? buildNotebookPythonSnippet(activeEngineId, `${rawAssets[0] ? toRawViewName(rawAssets[0].name) : 'raw_source_a'} a JOIN ${rawAssets[1] ? toRawViewName(rawAssets[1].name) : 'raw_source_b'} b ON a.id = b.id`, 'preview')
+                      : `SELECT *\nFROM ${rawAssets[0] ? toRawViewName(rawAssets[0].name) : 'raw_source_a'} a\nJOIN ${rawAssets[1] ? toRawViewName(rawAssets[1].name) : 'raw_source_b'} b\n  ON a.id = b.id\nLIMIT 25`)}
+                  >
+                    <p className="font-semibold text-ink">Insert Join Template</p>
+                    <p className="mt-2 text-sm text-slate/75">Start a multi-source enrichment step without hand-writing the skeleton.</p>
+                  </button>
+                  <button
+                    type="button"
+                    className={cn('rounded-2xl border p-4 text-left transition', theme === 'dark' ? 'border-white/10 bg-black/20 hover:border-white/20' : 'border-slate-200 bg-white hover:border-slate-300')}
+                    onClick={() => insertHelperSnippet('Delta write helper', buildWriteDeltaHelperSnippet(activeEngineId))}
+                  >
+                    <p className="font-semibold text-ink">Insert Delta Write Helper</p>
+                    <p className="mt-2 text-sm text-slate/75">Use the built-in notebook publishing helper to write the current result back to Delta Lake.</p>
+                  </button>
                 </div>
               </div>
             </div>
