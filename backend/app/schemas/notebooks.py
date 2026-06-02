@@ -70,3 +70,11 @@ class NotebookRunExecutionResponse(BaseModel):
     notebook: NotebookDocumentRead
     run: NotebookRunRead
     cell_results: list[NotebookCellExecutionResult]
+
+
+class NotebookCellActionResponse(BaseModel):
+    notebook: NotebookDocumentRead
+    run: NotebookRunRead
+    cell_results: list[NotebookCellExecutionResult]
+    mode: str
+    start_cell_id: str

@@ -8,6 +8,7 @@ from app.models.catalog import DeltaTable, UploadedFile
 from app.models.notebook import NotebookDocument, NotebookRun
 from app.schemas.engines import EngineCatalogResponse, NotebookExecutionRequest, NotebookExecutionResponse
 from app.schemas.notebooks import (
+    NotebookCellActionResponse,
     NotebookDetailResponse,
     NotebookDocumentCreateRequest,
     NotebookDocumentRead,
@@ -123,6 +124,63 @@ def run_saved_notebook(notebook_id: str, db: Session = Depends(get_db)) -> Noteb
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     db.refresh(notebook)
     return NotebookRunExecutionResponse(notebook=notebook, run=run, cell_results=cell_results)
+
+
+@router.post("/notebooks/{notebook_id}/cells/{cell_id}/run", response_model=NotebookCellActionResponse)
+def run_single_cell(notebook_id: str, cell_id: str, db: Session = Depends(get_db)) -> NotebookCellActionResponse:
+    notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
+    if notebook is None:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    try:
+        run, cell_results = execution_engine_service.execute_saved_notebook_range(
+            notebook,
+            db=db,
+            uploaded_files=db.query(UploadedFile).all(),
+            delta_tables=db.query(DeltaTable).all(),
+            start_cell_id=cell_id,
+            end_cell_id=cell_id,
+            limit=200,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    db.refresh(notebook)
+    return NotebookCellActionResponse(
+        notebook=notebook,
+        run=run,
+        cell_results=cell_results,
+        mode="single",
+        start_cell_id=cell_id,
+    )
+
+
+@router.post("/notebooks/{notebook_id}/cells/{cell_id}/run-from-here", response_model=NotebookCellActionResponse)
+def run_from_cell(notebook_id: str, cell_id: str, db: Session = Depends(get_db)) -> NotebookCellActionResponse:
+    notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
+    if notebook is None:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    try:
+        run, cell_results = execution_engine_service.execute_saved_notebook_range(
+            notebook,
+            db=db,
+            uploaded_files=db.query(UploadedFile).all(),
+            delta_tables=db.query(DeltaTable).all(),
+            start_cell_id=cell_id,
+            limit=200,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    db.refresh(notebook)
+    return NotebookCellActionResponse(
+        notebook=notebook,
+        run=run,
+        cell_results=cell_results,
+        mode="from_here",
+        start_cell_id=cell_id,
+    )
 
 
 @router.post("/notebooks/execute", response_model=NotebookExecutionResponse)

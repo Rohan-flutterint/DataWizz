@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Clock3, Cpu, DatabaseZap, FileCode2, Plus, Trash2 } from 'lucide-react'
+import { Clock3, Cpu, DatabaseZap, FileCode2, Play, Plus, SkipForward, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { DataTable } from '../components/data-table'
 import { MonacoSqlEditor } from '../components/monaco-sql-editor'
@@ -58,6 +58,7 @@ export function EngineLabPage() {
   const [cellResults, setCellResults] = useState<Record<string, NotebookCellRunResult>>({})
   const [runFeedback, setRunFeedback] = useState<string | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
+  const [cellActionState, setCellActionState] = useState<{ cellId: string; mode: 'single' | 'from_here' } | null>(null)
 
   const engineCatalogQuery = useQuery({ queryKey: ['execution-engines'], queryFn: api.listExecutionEngines })
   const notebooksQuery = useQuery({ queryKey: ['notebooks'], queryFn: api.listNotebooks })
@@ -112,6 +113,12 @@ export function EngineLabPage() {
   const runNotebookMutation = useMutation({
     mutationFn: api.runNotebook,
   })
+  const runCellMutation = useMutation({
+    mutationFn: ({ notebookId, cellId }: { notebookId: string; cellId: string }) => api.runNotebookCell(notebookId, cellId),
+  })
+  const runFromCellMutation = useMutation({
+    mutationFn: ({ notebookId, cellId }: { notebookId: string; cellId: string }) => api.runNotebookFromCell(notebookId, cellId),
+  })
 
   const activeNotebook = draftNotebook
 
@@ -154,6 +161,42 @@ export function EngineLabPage() {
       await queryClient.invalidateQueries({ queryKey: ['notebooks'] })
     } catch (error) {
       setRunError((error as Error).message)
+    }
+  }
+
+  const mergeCellResults = (items: NotebookCellRunResult[]) => {
+    setCellResults((current) => {
+      const next = { ...current }
+      items.forEach((item) => {
+        next[item.cell_id] = item
+      })
+      return next
+    })
+  }
+
+  const handleRunCellAction = async (cellId: string, mode: 'single' | 'from_here') => {
+    setRunError(null)
+    setRunFeedback(null)
+    setCellActionState({ cellId, mode })
+    try {
+      const saved = await persistNotebook()
+      if (!saved) return
+      const result =
+        mode === 'single'
+          ? await runCellMutation.mutateAsync({ notebookId: saved.id, cellId })
+          : await runFromCellMutation.mutateAsync({ notebookId: saved.id, cellId })
+      mergeCellResults(result.cell_results)
+      setRunFeedback(
+        mode === 'single'
+          ? `Cell run completed successfully in ${result.run.duration_ms ?? 0} ms`
+          : `Notebook rerun from this cell completed successfully in ${result.run.duration_ms ?? 0} ms`,
+      )
+      await queryClient.invalidateQueries({ queryKey: ['notebook-detail', saved.id] })
+      await queryClient.invalidateQueries({ queryKey: ['notebooks'] })
+    } catch (error) {
+      setRunError((error as Error).message)
+    } finally {
+      setCellActionState(null)
     }
   }
 
@@ -498,6 +541,26 @@ export function EngineLabPage() {
                         {result.status}
                       </span>
                     ) : null}
+                    <Button
+                      tone="ghost"
+                      disabled={!selectedEngine?.available || runNotebookMutation.isPending || createNotebookMutation.isPending || updateNotebookMutation.isPending || Boolean(cellActionState)}
+                      onClick={() => {
+                        void handleRunCellAction(cell.id, 'single')
+                      }}
+                    >
+                      <Play className="mr-2 h-4 w-4" />
+                      {cellActionState?.cellId === cell.id && cellActionState.mode === 'single' ? 'Running...' : 'Run Cell'}
+                    </Button>
+                    <Button
+                      tone="ghost"
+                      disabled={!selectedEngine?.available || runNotebookMutation.isPending || createNotebookMutation.isPending || updateNotebookMutation.isPending || Boolean(cellActionState)}
+                      onClick={() => {
+                        void handleRunCellAction(cell.id, 'from_here')
+                      }}
+                    >
+                      <SkipForward className="mr-2 h-4 w-4" />
+                      {cellActionState?.cellId === cell.id && cellActionState.mode === 'from_here' ? 'Running...' : 'Run From Here'}
+                    </Button>
                     <button
                       type="button"
                       className={cn('rounded-lg p-2 transition', theme === 'dark' ? 'text-white/55 hover:bg-white/5 hover:text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900')}

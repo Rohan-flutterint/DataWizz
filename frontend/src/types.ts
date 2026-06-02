@@ -422,6 +422,14 @@ export type NotebookRunExecution = {
   cell_results: NotebookCellRunResult[]
 }
 
+export type NotebookCellActionExecution = {
+  notebook: NotebookDocument
+  run: NotebookRun
+  cell_results: NotebookCellRunResult[]
+  mode: string
+  start_cell_id: string
+}
+
 export type ReportSchedule = {
   id: string
   name: string
