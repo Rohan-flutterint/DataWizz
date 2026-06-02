@@ -1,15 +1,28 @@
+from uuid import uuid4
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from fastapi import APIRouter, Depends
-from sqlalchemy import desc
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.session import get_db
+from app.models.bi import Chart, Dashboard
 from app.models.catalog import DeltaTable, UploadedFile
 from app.models.pipeline import JobLog, PipelineRun
-from app.schemas.system import DashboardMetricsResponse, RecentActivityItem, SettingsSnapshotResponse, SupersetHealthResponse
+from app.models.pipeline import Pipeline
+from app.schemas.system import (
+    DashboardMetricsResponse,
+    DemoLoginRequest,
+    DemoLoginResponse,
+    DemoUserResponse,
+    GlobalSearchResponse,
+    GlobalSearchResult,
+    RecentActivityItem,
+    SettingsSnapshotResponse,
+    SupersetHealthResponse,
+)
 from app.services.storage import StorageService
 
 
@@ -56,6 +69,143 @@ def settings_snapshot() -> SettingsSnapshotResponse:
         },
         execution={"engine": settings.execution_engine, "query_preview_limit": settings.query_preview_limit},
     )
+
+
+@router.post("/demo-login", response_model=DemoLoginResponse)
+def demo_login(payload: DemoLoginRequest) -> DemoLoginResponse:
+    if payload.email.strip().lower() != settings.demo_admin_email.lower() or payload.password != settings.demo_admin_password:
+        raise HTTPException(status_code=401, detail="Invalid demo credentials")
+
+    return DemoLoginResponse(
+        token=str(uuid4()),
+        user=DemoUserResponse(
+            name=settings.demo_admin_name,
+            email=settings.demo_admin_email,
+            role="admin",
+        ),
+    )
+
+
+@router.get("/search", response_model=GlobalSearchResponse)
+def global_search(
+    db: Session = Depends(get_db),
+    q: str = Query(min_length=1),
+    limit: int = Query(default=12, ge=1, le=30),
+) -> GlobalSearchResponse:
+    needle = q.strip()
+    if not needle:
+        return GlobalSearchResponse(query=q, items=[])
+
+    like = f"%{needle}%"
+    items: list[GlobalSearchResult] = []
+
+    files = (
+        db.query(UploadedFile)
+        .filter(UploadedFile.name.ilike(like))
+        .order_by(desc(UploadedFile.updated_at))
+        .limit(limit)
+        .all()
+    )
+    items.extend(
+        [
+            GlobalSearchResult(
+                id=item.id,
+                kind="file",
+                title=item.name,
+                subtitle=f"{item.file_type.upper()} raw asset",
+                route=f"/files?fileId={item.id}",
+                updated_at=item.updated_at.isoformat(),
+            )
+            for item in files
+        ]
+    )
+
+    tables = (
+        db.query(DeltaTable)
+        .filter(or_(DeltaTable.name.ilike(like), DeltaTable.description.ilike(like), DeltaTable.schema_name.ilike(like)))
+        .order_by(desc(DeltaTable.updated_at))
+        .limit(limit)
+        .all()
+    )
+    items.extend(
+        [
+            GlobalSearchResult(
+                id=item.id,
+                kind="table",
+                title=f"{item.schema_name}.{item.name}",
+                subtitle=item.description or "Curated Delta Lake table",
+                route=f"/catalog?tableId={item.id}",
+                updated_at=item.updated_at.isoformat(),
+            )
+            for item in tables
+        ]
+    )
+
+    pipelines = (
+        db.query(Pipeline)
+        .filter(or_(Pipeline.name.ilike(like), Pipeline.description.ilike(like)))
+        .order_by(desc(Pipeline.updated_at))
+        .limit(limit)
+        .all()
+    )
+    items.extend(
+        [
+            GlobalSearchResult(
+                id=item.id,
+                kind="pipeline",
+                title=item.name,
+                subtitle=item.description or "Pipeline definition",
+                route=f"/pipelines?pipelineId={item.id}",
+                updated_at=item.updated_at.isoformat(),
+            )
+            for item in pipelines
+        ]
+    )
+
+    dashboards = (
+        db.query(Dashboard)
+        .filter(or_(Dashboard.name.ilike(like), Dashboard.description.ilike(like)))
+        .order_by(desc(Dashboard.updated_at))
+        .limit(limit)
+        .all()
+    )
+    items.extend(
+        [
+            GlobalSearchResult(
+                id=item.id,
+                kind="dashboard",
+                title=item.name,
+                subtitle=item.description or "BI dashboard",
+                route=f"/bi/dashboards?dashboardId={item.id}",
+                updated_at=item.updated_at.isoformat(),
+            )
+            for item in dashboards
+        ]
+    )
+
+    charts = (
+        db.query(Chart)
+        .filter(or_(Chart.name.ilike(like), Chart.chart_type.ilike(like)))
+        .order_by(desc(Chart.updated_at))
+        .limit(limit)
+        .all()
+    )
+    items.extend(
+        [
+            GlobalSearchResult(
+                id=item.id,
+                kind="chart",
+                title=item.name,
+                subtitle=f"{item.chart_type} chart",
+                route=f"/bi/charts?chartId={item.id}",
+                updated_at=item.updated_at.isoformat(),
+            )
+            for item in charts
+        ]
+    )
+
+    items.sort(key=lambda item: item.updated_at, reverse=True)
+    return GlobalSearchResponse(query=q, items=items[:limit])
 
 
 @router.get("/integrations/superset", response_model=SupersetHealthResponse)

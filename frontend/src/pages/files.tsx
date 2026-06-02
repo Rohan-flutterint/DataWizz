@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { type DragEvent, useRef, useState } from 'react'
+import { type DragEvent, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { DataTable } from '../components/data-table'
 import { StatusBadge } from '../components/status-badge'
 import { Button, EmptyState, PageHeader, Panel } from '../components/ui'
@@ -8,11 +9,13 @@ import { formatBytes, formatDate } from '../lib/utils'
 import type { UploadedFile } from '../types'
 
 export function FileExplorerPage() {
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [isDragActive, setIsDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const appliedSearchFileIdRef = useRef<string | null>(null)
 
   const filesQuery = useQuery({ queryKey: ['files'], queryFn: api.listFiles })
   const previewQuery = useQuery({
@@ -20,6 +23,19 @@ export function FileExplorerPage() {
     queryFn: () => api.previewFile(selectedFileId!),
     enabled: Boolean(selectedFileId),
   })
+
+  useEffect(() => {
+    const requestedFileId = searchParams.get('fileId')
+    if (
+      !requestedFileId ||
+      appliedSearchFileIdRef.current === requestedFileId ||
+      !filesQuery.data?.items?.some((file) => file.id === requestedFileId)
+    ) {
+      return
+    }
+    appliedSearchFileIdRef.current = requestedFileId
+    setSelectedFileId(requestedFileId)
+  }, [filesQuery.data, searchParams])
 
   const uploadMutation = useMutation({
     mutationFn: api.uploadFile,
