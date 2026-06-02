@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from time import perf_counter
@@ -20,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models.catalog import DeltaTable as DeltaTableModel
 from app.models.catalog import UploadedFile
+from app.models.notebook import NotebookDocument, NotebookRun
 from app.services.delta_service import DeltaService
 from app.services.duckdb_service import DuckDBService
 from app.utils.naming import slugify_identifier
@@ -61,40 +63,263 @@ class ExecutionEngineService:
         context = self._build_source_context(uploaded_files, delta_tables)
 
         if engine_id == "duckdb":
+            runtime = self._build_duckdb_runtime(engine, uploaded_files, delta_tables, context)
+            result = self._execute_runtime_cell(runtime, code, db, limit)
+            return {"engine": engine, "result": result}
+
+        if engine_id == "spark":
+            runtime = self._build_spark_runtime(engine, uploaded_files, delta_tables, db, context)
+            result = self._execute_runtime_cell(runtime, code, db, limit)
+            return {"engine": engine, "result": result}
+
+        if engine_id == "datafusion":
+            runtime = self._build_datafusion_runtime(engine, uploaded_files, delta_tables, db, context)
+            result = self._execute_runtime_cell(runtime, code, db, limit)
+            return {"engine": engine, "result": result}
+
+        raise ValueError(f"Execution for engine '{engine_id}' is not implemented.")
+
+    def execute_saved_notebook(
+        self,
+        notebook: NotebookDocument,
+        *,
+        db: Session,
+        uploaded_files: list[UploadedFile],
+        delta_tables: list[DeltaTableModel],
+        limit: int = 200,
+    ) -> tuple[NotebookRun, list[dict[str, Any]]]:
+        engine = self.get_engine(notebook.engine_id)
+        if not engine["available"]:
+            raise ValueError(engine["availability_reason"] or f"{engine['label']} is not available in this environment.")
+
+        context = self._build_source_context(uploaded_files, delta_tables)
+        runtime = self._build_runtime(
+            notebook.engine_id,
+            engine=engine,
+            uploaded_files=uploaded_files,
+            delta_tables=delta_tables,
+            db=db,
+            context=context,
+        )
+
+        run = NotebookRun(
+            notebook_id=notebook.id,
+            engine_id=notebook.engine_id,
+            status="running",
+            started_at=datetime.now(timezone.utc),
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+        cell_results: list[dict[str, Any]] = []
+        run_started = perf_counter()
+        run_error: str | None = None
+
+        try:
+            for index, cell in enumerate(notebook.cells_json or [], start=1):
+                if not cell.get("code"):
+                    continue
+                result = self._execute_runtime_cell(runtime, cell["code"], db, limit)
+                cell_results.append(
+                    {
+                        "cell_id": cell["id"],
+                        "title": cell.get("title") or f"Cell {index}",
+                        "status": result["status"],
+                        "execution_ms": result["execution_ms"],
+                        "columns": result["columns"],
+                        "rows": result["rows"],
+                        "row_count": result["row_count"],
+                        "stdout": result["stdout"],
+                        "message": result["message"],
+                        "warnings": result["warnings"],
+                    }
+                )
+            run.status = "success"
+        except Exception as exc:  # noqa: BLE001
+            run.status = "failed"
+            run_error = str(exc)
+            run.error_message = run_error
+            raise
+        finally:
+            duration_ms = int((perf_counter() - run_started) * 1000)
+            notebook.last_run_at = datetime.now(timezone.utc)
+            run.finished_at = datetime.now(timezone.utc)
+            run.duration_ms = duration_ms
+            run.run_summary = {
+                "notebook_name": notebook.name,
+                "engine_id": notebook.engine_id,
+                "cell_count": len(notebook.cells_json or []),
+                "completed_cells": len(cell_results),
+                "cell_results": cell_results,
+            }
+            if run_error:
+                run.run_summary["error"] = run_error
+            db.commit()
+            db.refresh(run)
+            db.refresh(notebook)
+
+        return run, cell_results
+
+    def _build_runtime(
+        self,
+        engine_id: str,
+        *,
+        engine: dict[str, Any],
+        uploaded_files: list[UploadedFile],
+        delta_tables: list[DeltaTableModel],
+        db: Session | None,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        if engine_id == "duckdb":
+            return self._build_duckdb_runtime(engine, uploaded_files, delta_tables, context)
+        if engine_id == "spark":
+            return self._build_spark_runtime(engine, uploaded_files, delta_tables, db, context)
+        if engine_id == "datafusion":
+            return self._build_datafusion_runtime(engine, uploaded_files, delta_tables, db, context)
+        raise ValueError(f"Execution for engine '{engine_id}' is not implemented.")
+
+    def _build_duckdb_runtime(
+        self,
+        engine: dict[str, Any],
+        uploaded_files: list[UploadedFile],
+        delta_tables: list[DeltaTableModel],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "engine": engine,
+            "type": "duckdb",
+            "uploaded_files": uploaded_files,
+            "delta_tables": delta_tables,
+            "context": context,
+            "warnings": [],
+        }
+
+    def _build_spark_runtime(
+        self,
+        engine: dict[str, Any],
+        uploaded_files: list[UploadedFile],
+        delta_tables: list[DeltaTableModel],
+        db: Session | None,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        from pyspark.sql import SparkSession
+
+        spark = self._get_or_create_spark_session(SparkSession)
+        warnings: list[str] = []
+
+        for file_record in uploaded_files:
+            view_name = f"raw_{slugify_identifier(Path(file_record.name).stem)}"
+            dataframe = self._read_file_with_spark(spark, file_record)
+            dataframe.createOrReplaceTempView(view_name)
+
+        for table_record in delta_tables:
+            view_name = slugify_identifier(table_record.name)
+            arrow_table = DeltaLakeTable(table_record.storage_path).to_pyarrow_table()
+            dataframe = spark.createDataFrame(arrow_table.to_pandas())
+            dataframe.createOrReplaceTempView(view_name)
+
+        namespace = {
+            "spark": spark,
+            "source_catalog": context,
+            "raw_views": context["raw_views"],
+            "curated_views": context["curated_views"],
+            "result": None,
+        }
+        namespace["write_delta"] = self._build_write_delta_helper(db, namespace, engine_id=engine["id"])
+        return {
+            "engine": engine,
+            "type": "python",
+            "namespace": namespace,
+            "context": context,
+            "warnings": warnings,
+        }
+
+    def _build_datafusion_runtime(
+        self,
+        engine: dict[str, Any],
+        uploaded_files: list[UploadedFile],
+        delta_tables: list[DeltaTableModel],
+        db: Session | None,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        from datafusion import SessionContext
+
+        ctx = SessionContext()
+        warnings: list[str] = []
+
+        for file_record in uploaded_files:
+            view_name = f"raw_{slugify_identifier(Path(file_record.name).stem)}"
+            path = file_record.storage_path
+            if file_record.file_type == "csv":
+                ctx.register_csv(view_name, path)
+            elif file_record.file_type == "json":
+                ctx.register_json(view_name, path)
+            elif file_record.file_type == "parquet":
+                ctx.register_parquet(view_name, path)
+            else:
+                warnings.append(
+                    f"DataFusion auto-registration currently skips {file_record.file_type.upper()} source '{file_record.name}'."
+                )
+
+        for table_record in delta_tables:
+            view_name = slugify_identifier(table_record.name)
+            arrow_table = DeltaLakeTable(table_record.storage_path).to_pyarrow_table()
+            ctx.register_record_batches(view_name, [arrow_table.to_batches()])
+
+        namespace = {
+            "ctx": ctx,
+            "source_catalog": context,
+            "raw_views": context["raw_views"],
+            "curated_views": context["curated_views"],
+            "result": None,
+        }
+        namespace["write_delta"] = self._build_write_delta_helper(db, namespace, engine_id=engine["id"])
+        return {
+            "engine": engine,
+            "type": "python",
+            "namespace": namespace,
+            "context": context,
+            "warnings": warnings,
+        }
+
+    def _execute_runtime_cell(
+        self,
+        runtime: dict[str, Any],
+        code: str,
+        db: Session | None,
+        limit: int,
+    ) -> dict[str, Any]:
+        engine = runtime["engine"]
+        context = runtime["context"]
+        warnings = list(runtime.get("warnings", []))
+
+        if runtime["type"] == "duckdb":
             result = self.duckdb_service.execute_query(
                 code,
-                uploaded_files=uploaded_files,
-                delta_tables=delta_tables,
+                uploaded_files=runtime["uploaded_files"],
+                delta_tables=runtime["delta_tables"],
                 limit=limit,
             )
             return {
-                "engine": engine,
-                "result": {
-                    "engine_id": engine["id"],
-                    "engine_label": engine["label"],
-                    "status": "success",
-                    "language": engine["runtime_language"],
-                    "execution_ms": result["execution_ms"],
-                    "columns": result["columns"],
-                    "rows": result["rows"],
-                    "row_count": result["row_count"],
-                    "stdout": None,
-                    "message": f"Executed DuckDB SQL successfully with {len(context['raw_views'])} raw view(s) and {len(context['curated_views'])} curated table(s) registered.",
-                    "warnings": [],
-                    "metadata": {
-                        **context,
-                        "registered_views": result["registered_views"],
-                    },
+                "engine_id": engine["id"],
+                "engine_label": engine["label"],
+                "status": "success",
+                "language": engine["runtime_language"],
+                "execution_ms": result["execution_ms"],
+                "columns": result["columns"],
+                "rows": result["rows"],
+                "row_count": result["row_count"],
+                "stdout": None,
+                "message": f"Executed DuckDB SQL successfully with {len(context['raw_views'])} raw view(s) and {len(context['curated_views'])} curated table(s) registered.",
+                "warnings": warnings,
+                "metadata": {
+                    **context,
+                    "registered_views": result["registered_views"],
                 },
             }
 
-        if engine_id == "spark":
-            return self._execute_spark_notebook(engine, code, uploaded_files, delta_tables, db, limit, context)
-
-        if engine_id == "datafusion":
-            return self._execute_datafusion_notebook(engine, code, uploaded_files, delta_tables, db, limit, context)
-
-        raise ValueError(f"Execution for engine '{engine_id}' is not implemented.")
+        return self._execute_python_notebook(engine, code, runtime["namespace"], db, limit, context, warnings)["result"]
 
     def _build_duckdb_descriptor(self) -> dict[str, Any]:
         return {
@@ -214,84 +439,6 @@ class ExecutionEngineService:
             ],
         }
 
-    def _execute_spark_notebook(
-        self,
-        engine: dict[str, Any],
-        code: str,
-        uploaded_files: list[UploadedFile],
-        delta_tables: list[DeltaTableModel],
-        db: Session | None,
-        limit: int,
-        context: dict[str, Any],
-    ) -> dict[str, Any]:
-        from pyspark.sql import SparkSession
-
-        spark = self._get_or_create_spark_session(SparkSession)
-        warnings: list[str] = []
-
-        for file_record in uploaded_files:
-            view_name = f"raw_{slugify_identifier(Path(file_record.name).stem)}"
-            dataframe = self._read_file_with_spark(spark, file_record)
-            dataframe.createOrReplaceTempView(view_name)
-
-        for table_record in delta_tables:
-            view_name = slugify_identifier(table_record.name)
-            arrow_table = DeltaLakeTable(table_record.storage_path).to_pyarrow_table()
-            dataframe = spark.createDataFrame(arrow_table.to_pandas())
-            dataframe.createOrReplaceTempView(view_name)
-
-        namespace = {
-            "spark": spark,
-            "source_catalog": context,
-            "raw_views": context["raw_views"],
-            "curated_views": context["curated_views"],
-            "result": None,
-        }
-        return self._execute_python_notebook(engine, code, namespace, db, limit, context, warnings)
-
-    def _execute_datafusion_notebook(
-        self,
-        engine: dict[str, Any],
-        code: str,
-        uploaded_files: list[UploadedFile],
-        delta_tables: list[DeltaTableModel],
-        db: Session | None,
-        limit: int,
-        context: dict[str, Any],
-    ) -> dict[str, Any]:
-        from datafusion import SessionContext
-
-        ctx = SessionContext()
-        warnings: list[str] = []
-
-        for file_record in uploaded_files:
-            view_name = f"raw_{slugify_identifier(Path(file_record.name).stem)}"
-            path = file_record.storage_path
-            if file_record.file_type == "csv":
-                ctx.register_csv(view_name, path)
-            elif file_record.file_type == "json":
-                ctx.register_json(view_name, path)
-            elif file_record.file_type == "parquet":
-                ctx.register_parquet(view_name, path)
-            else:
-                warnings.append(
-                    f"DataFusion auto-registration currently skips {file_record.file_type.upper()} source '{file_record.name}'."
-                )
-
-        for table_record in delta_tables:
-            view_name = slugify_identifier(table_record.name)
-            arrow_table = DeltaLakeTable(table_record.storage_path).to_pyarrow_table()
-            ctx.register_record_batches(view_name, [arrow_table.to_batches()])
-
-        namespace = {
-            "ctx": ctx,
-            "source_catalog": context,
-            "raw_views": context["raw_views"],
-            "curated_views": context["curated_views"],
-            "result": None,
-        }
-        return self._execute_python_notebook(engine, code, namespace, db, limit, context, warnings)
-
     def _execute_python_notebook(
         self,
         engine: dict[str, Any],
@@ -302,10 +449,6 @@ class ExecutionEngineService:
         context: dict[str, Any],
         warnings: list[str],
     ) -> dict[str, Any]:
-        namespace = {
-            **namespace,
-            "write_delta": self._build_write_delta_helper(db, namespace),
-        }
         stdout_buffer = StringIO()
         started = perf_counter()
         with redirect_stdout(stdout_buffer):
@@ -331,7 +474,7 @@ class ExecutionEngineService:
             },
         }
 
-    def _build_write_delta_helper(self, db: Session | None, namespace: dict[str, Any]):
+    def _build_write_delta_helper(self, db: Session | None, namespace: dict[str, Any], *, engine_id: str):
         def write_delta(
             result: Any | None = None,
             *,
@@ -353,7 +496,7 @@ class ExecutionEngineService:
                 mode=mode,
                 schema_name=schema_name,
                 description=description,
-                source_query=f"Notebook runtime write via {namespace.get('spark') and 'spark' or namespace.get('ctx') and 'datafusion' or 'python'}",
+                source_query=f"Notebook runtime write via {engine_id}",
             )
             return {
                 "table_id": table.id,

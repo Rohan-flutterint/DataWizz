@@ -367,6 +367,61 @@ export type NotebookExecutionResponse = {
   result: NotebookExecutionResult
 }
 
+export type NotebookCell = {
+  id: string
+  title?: string | null
+  code: string
+}
+
+export type NotebookDocument = {
+  id: string
+  name: string
+  engine_id: string
+  description?: string | null
+  cells_json: NotebookCell[]
+  last_run_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type NotebookRun = {
+  id: string
+  notebook_id: string
+  engine_id: string
+  status: string
+  started_at?: string | null
+  finished_at?: string | null
+  duration_ms?: number | null
+  error_message?: string | null
+  run_summary?: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+}
+
+export type NotebookCellRunResult = {
+  cell_id: string
+  title?: string | null
+  status: string
+  execution_ms: number
+  columns: string[]
+  rows: Record<string, unknown>[]
+  row_count: number
+  stdout?: string | null
+  message?: string | null
+  warnings: string[]
+}
+
+export type NotebookDetail = {
+  notebook: NotebookDocument
+  recent_runs: NotebookRun[]
+}
+
+export type NotebookRunExecution = {
+  notebook: NotebookDocument
+  run: NotebookRun
+  cell_results: NotebookCellRunResult[]
+}
+
 export type ReportSchedule = {
   id: string
   name: string
