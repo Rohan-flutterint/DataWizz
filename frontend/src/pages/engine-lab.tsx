@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Clock3, Cpu, DatabaseZap, FileCode2, Play, Plus, SkipForward, Trash2 } from 'lucide-react'
+import { Clock3, Copy, Cpu, DatabaseZap, FileCode2, PencilLine, Play, Plus, SkipForward, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { DataTable } from '../components/data-table'
 import { MonacoSqlEditor } from '../components/monaco-sql-editor'
@@ -119,8 +119,23 @@ export function EngineLabPage() {
   const runFromCellMutation = useMutation({
     mutationFn: ({ notebookId, cellId }: { notebookId: string; cellId: string }) => api.runNotebookFromCell(notebookId, cellId),
   })
+  const duplicateNotebookMutation = useMutation({
+    mutationFn: api.duplicateNotebook,
+  })
+  const deleteNotebookMutation = useMutation({
+    mutationFn: api.deleteNotebook,
+  })
 
   const activeNotebook = draftNotebook
+  const hasSelectedNotebook = Boolean(selectedNotebookId)
+
+  const resetNotebookDraft = (engineOverride?: ExecutionEngine | null) => {
+    setSelectedNotebookId(null)
+    setCellResults({})
+    setRunFeedback(null)
+    setRunError(null)
+    setDraftNotebook(buildDefaultNotebook(engineOverride ?? selectedEngine))
+  }
 
   const persistNotebook = async () => {
     if (!activeNotebook) return null
@@ -142,6 +157,40 @@ export function EngineLabPage() {
     setSelectedNotebookId(saved.id)
     setDraftNotebook(saved)
     return saved
+  }
+
+  const handleDuplicateNotebook = async (notebookId: string) => {
+    setRunError(null)
+    setRunFeedback(null)
+    try {
+      const duplicate = await duplicateNotebookMutation.mutateAsync(notebookId)
+      await queryClient.invalidateQueries({ queryKey: ['notebooks'] })
+      await queryClient.invalidateQueries({ queryKey: ['notebook-detail', duplicate.id] })
+      setSelectedNotebookId(duplicate.id)
+      setDraftNotebook(duplicate)
+      setCellResults({})
+      setRunFeedback(`Duplicated notebook as ${duplicate.name}`)
+    } catch (error) {
+      setRunError((error as Error).message)
+    }
+  }
+
+  const handleDeleteNotebook = async (notebook: NotebookDocument) => {
+    const confirmed = window.confirm(`Delete notebook "${notebook.name}"? This will also remove its run history.`)
+    if (!confirmed) return
+    setRunError(null)
+    setRunFeedback(null)
+    try {
+      await deleteNotebookMutation.mutateAsync(notebook.id)
+      await queryClient.invalidateQueries({ queryKey: ['notebooks'] })
+      await queryClient.removeQueries({ queryKey: ['notebook-detail', notebook.id] })
+      if (selectedNotebookId === notebook.id) {
+        resetNotebookDraft(selectedEngine)
+      }
+      setRunFeedback(`Deleted notebook ${notebook.name}`)
+    } catch (error) {
+      setRunError((error as Error).message)
+    }
   }
 
   const handleRunNotebook = async () => {
@@ -213,14 +262,22 @@ export function EngineLabPage() {
             <Button
               tone="ghost"
               onClick={() => {
-                setSelectedNotebookId(null)
-                setCellResults({})
-                setRunFeedback(null)
-                setRunError(null)
-                setDraftNotebook(buildDefaultNotebook(selectedEngine))
+                resetNotebookDraft(selectedEngine)
               }}
             >
               New Notebook
+            </Button>
+            <Button
+              tone="ghost"
+              disabled={!hasSelectedNotebook || duplicateNotebookMutation.isPending}
+              onClick={() => {
+                if (selectedNotebookId) {
+                  void handleDuplicateNotebook(selectedNotebookId)
+                }
+              }}
+            >
+              <Copy className="mr-2 h-4 w-4" />
+              {duplicateNotebookMutation.isPending ? 'Duplicating...' : 'Duplicate'}
             </Button>
             <Button
               tone="ghost"
@@ -230,6 +287,18 @@ export function EngineLabPage() {
               }}
             >
               {createNotebookMutation.isPending || updateNotebookMutation.isPending ? 'Saving...' : 'Save Notebook'}
+            </Button>
+            <Button
+              tone="ghost"
+              disabled={!hasSelectedNotebook || deleteNotebookMutation.isPending}
+              onClick={() => {
+                if (selectedNotebookId && activeNotebook) {
+                  void handleDeleteNotebook(activeNotebook)
+                }
+              }}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              {deleteNotebookMutation.isPending ? 'Deleting...' : 'Delete'}
             </Button>
             <Button
               disabled={!activeNotebook || !selectedEngine || !selectedEngine.available || runNotebookMutation.isPending}
@@ -323,11 +392,7 @@ export function EngineLabPage() {
                 <h3 className="mt-2 font-display text-2xl text-ink">Saved notebooks</h3>
               </div>
               <Button tone="ghost" onClick={() => {
-                setSelectedNotebookId(null)
-                setCellResults({})
-                setRunFeedback(null)
-                setRunError(null)
-                setDraftNotebook(buildDefaultNotebook(selectedEngine))
+                resetNotebookDraft(selectedEngine)
               }}>
                 <Plus className="mr-2 h-4 w-4" />
                 New
@@ -360,9 +425,43 @@ export function EngineLabPage() {
                         <p className="font-semibold text-ink">{notebook.name}</p>
                         <p className="mt-1 text-sm text-slate/75">{notebook.cells_json.length} cell(s) · {notebook.engine_id}</p>
                       </div>
-                      <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em]', theme === 'dark' ? 'bg-white/5 text-white/55' : 'bg-white text-slate-500')}>
-                        {notebook.last_run_at ? 'Run' : 'Saved'}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em]', theme === 'dark' ? 'bg-white/5 text-white/55' : 'bg-white text-slate-500')}>
+                          {notebook.last_run_at ? 'Run' : 'Saved'}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={`Duplicate ${notebook.name}`}
+                          className={cn(
+                            'rounded-full border p-2 transition',
+                            theme === 'dark'
+                              ? 'border-white/10 bg-white/[0.03] text-white/70 hover:border-white/20 hover:bg-white/[0.06]'
+                              : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700',
+                          )}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void handleDuplicateNotebook(notebook.id)
+                          }}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete ${notebook.name}`}
+                          className={cn(
+                            'rounded-full border p-2 transition',
+                            theme === 'dark'
+                              ? 'border-rose-500/20 bg-rose-500/10 text-rose-300 hover:border-rose-500/35 hover:bg-rose-500/15'
+                              : 'border-rose-200 bg-rose-50 text-rose-600 hover:border-rose-300 hover:bg-rose-100',
+                          )}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void handleDeleteNotebook(notebook)
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                     <p className="mt-3 text-xs text-slate/60">
                       Updated {formatDate(notebook.updated_at)}
@@ -412,6 +511,14 @@ export function EngineLabPage() {
                   onChange={(event) => setDraftNotebook((current) => (current ? { ...current, name: event.target.value } : current))}
                   placeholder="Revenue Investigation Notebook"
                 />
+                <div className="mt-2 flex items-center gap-2 text-xs text-slate/60">
+                  <PencilLine className="h-3.5 w-3.5" />
+                  <span>
+                    {selectedNotebookId
+                      ? 'Rename by editing the title here, then click Save Notebook.'
+                      : 'This is a draft notebook until you save it to the library.'}
+                  </span>
+                </div>
               </div>
               <div>
                 <Label>Runtime</Label>
@@ -456,6 +563,18 @@ export function EngineLabPage() {
               }}>
                 Clear Outputs
               </Button>
+              {selectedNotebookId ? (
+                <Button
+                  tone="ghost"
+                  disabled={duplicateNotebookMutation.isPending}
+                  onClick={() => {
+                    void handleDuplicateNotebook(selectedNotebookId)
+                  }}
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Duplicate Notebook
+                </Button>
+              ) : null}
             </div>
           </Panel>
 

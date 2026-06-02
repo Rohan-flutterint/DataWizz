@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.db.session import get_db
 from app.models.catalog import DeltaTable, UploadedFile
 from app.models.notebook import NotebookDocument, NotebookRun
+from app.schemas.common import ApiMessage
 from app.schemas.engines import EngineCatalogResponse, NotebookExecutionRequest, NotebookExecutionResponse
 from app.schemas.notebooks import (
     NotebookCellActionResponse,
@@ -103,6 +104,38 @@ def update_notebook(
         raise HTTPException(status_code=409, detail="A notebook with this name already exists. Please try again.") from exc
     db.refresh(notebook)
     return notebook
+
+
+@router.post("/notebooks/{notebook_id}/duplicate", response_model=NotebookDocumentRead)
+def duplicate_notebook(notebook_id: str, db: Session = Depends(get_db)) -> NotebookDocumentRead:
+    notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
+    if notebook is None:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    duplicate = NotebookDocument(
+        name=_resolve_notebook_name(db, f"{notebook.name} Copy"),
+        engine_id=notebook.engine_id,
+        description=notebook.description,
+        cells_json=list(notebook.cells_json or []),
+    )
+    db.add(duplicate)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This notebook could not be duplicated right now. Please try again.") from exc
+    db.refresh(duplicate)
+    return duplicate
+
+
+@router.delete("/notebooks/{notebook_id}", response_model=ApiMessage)
+def delete_notebook(notebook_id: str, db: Session = Depends(get_db)) -> ApiMessage:
+    notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
+    if notebook is None:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    db.query(NotebookRun).filter(NotebookRun.notebook_id == notebook_id).delete()
+    db.delete(notebook)
+    db.commit()
+    return ApiMessage(message="Notebook deleted successfully")
 
 
 @router.post("/notebooks/{notebook_id}/run", response_model=NotebookRunExecutionResponse)
