@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import { DataTable } from '../components/data-table'
 import { MonacoSqlEditor } from '../components/monaco-sql-editor'
 import { Button, Input, Label, PageHeader, Panel, Select } from '../components/ui'
+import { useExecutionEngine } from '../engine/engine-context'
 import { api } from '../lib/api'
 import { formatDate } from '../lib/utils'
 import { useTheme } from '../theme/theme-context'
@@ -16,6 +17,7 @@ function toRawViewName(fileName: string) {
 
 export function SqlWorkspacePage() {
   const { theme } = useTheme()
+  const { activeEngineId } = useExecutionEngine()
   const queryClient = useQueryClient()
   const [searchParams] = useSearchParams()
   const [sql, setSql] = useState(defaultSql)
@@ -120,6 +122,15 @@ export function SqlWorkspacePage() {
           </>
         }
       />
+
+      {activeEngineId !== 'duckdb' ? (
+        <Panel className="border-cyan-200 bg-cyan-50 text-cyan-900 dark:border-cyan-500/20 dark:bg-cyan-500/10 dark:text-cyan-100">
+          <p className="font-semibold">Notebook engine selected: {activeEngineId}</p>
+          <p className="mt-2 text-sm leading-6">
+            The SQL Workspace remains DuckDB-backed for SQL execution and Delta publishing. Use the new Engine Lab tab for Spark or DataFusion notebook-style runtime selection.
+          </p>
+        </Panel>
+      ) : null}
 
       <div className="grid gap-5 xl:grid-cols-[1.35fr_0.9fr]">
         <Panel className="space-y-4 p-0">

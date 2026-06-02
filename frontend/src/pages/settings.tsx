@@ -1,12 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { MoonStar, SunMedium } from 'lucide-react'
 import { PageHeader, Panel } from '../components/ui'
+import { useExecutionEngine } from '../engine/engine-context'
 import { api } from '../lib/api'
 import { useTheme } from '../theme/theme-context'
 
 export function SettingsPage() {
   const { data } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings })
+  const engineCatalogQuery = useQuery({ queryKey: ['execution-engines'], queryFn: api.listExecutionEngines })
   const { theme, setTheme } = useTheme()
+  const { activeEngineId, setActiveEngineId } = useExecutionEngine()
 
   return (
     <div className="space-y-6">
@@ -102,6 +105,46 @@ export function SettingsPage() {
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">{key}</p>
                 <p className="mt-2 text-ink">{String(value)}</p>
               </div>
+            ))}
+          </div>
+          <div className="mt-5 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Notebook engine selection</p>
+            {engineCatalogQuery.data?.items?.map((engine) => (
+              <button
+                key={engine.id}
+                type="button"
+                onClick={() => setActiveEngineId(engine.id)}
+                className={`w-full rounded-2xl border p-4 text-left transition ${
+                  activeEngineId === engine.id
+                    ? theme === 'dark'
+                      ? 'border-[#f6f24a]/35 bg-[#181818]'
+                      : 'border-[#ff3621] bg-[#fff1ef]'
+                    : theme === 'dark'
+                      ? 'border-white/10 bg-white/[0.03] hover:border-white/20'
+                      : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="font-semibold text-ink">{engine.label}</p>
+                    <p className="mt-1 text-sm text-slate/75">{engine.summary}</p>
+                  </div>
+                  <span
+                    className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] ${
+                      engine.available
+                        ? theme === 'dark'
+                          ? 'bg-emerald-500/15 text-emerald-300'
+                          : 'bg-emerald-100 text-emerald-700'
+                        : theme === 'dark'
+                          ? 'bg-orange-500/15 text-orange-300'
+                          : 'bg-orange-100 text-orange-700'
+                    }`}
+                  >
+                    {activeEngineId === engine.id ? 'Active' : engine.status.replace(/_/g, ' ')}
+                  </span>
+                </div>
+                {!engine.available && engine.availability_reason ? <p className="mt-2 text-sm text-slate/75">{engine.availability_reason}</p> : null}
+              </button>
             ))}
           </div>
         </Panel>
