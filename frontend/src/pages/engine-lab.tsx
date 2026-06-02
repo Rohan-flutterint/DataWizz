@@ -73,6 +73,7 @@ function buildDefaultNotebook(engine: ExecutionEngine | null): NotebookDocument 
     engine_id: engine.id,
     description: `Exploratory ${engine.label} notebook for the local lakehouse sources.`,
     cells_json: [createCell(engine.sample_code, 'Starter cell')],
+    latest_cell_results_json: [],
     last_run_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -124,8 +125,7 @@ export function EngineLabPage() {
     if (!detail) return
     setDraftNotebook(detail.notebook)
     setActiveEngineId(detail.notebook.engine_id)
-    const latestRun = detail.recent_runs[0]
-    const latestCellResults = (latestRun?.run_summary?.cell_results as NotebookCellRunResult[] | undefined) ?? []
+    const latestCellResults = detail.notebook.latest_cell_results_json ?? []
     const nextResults: Record<string, NotebookCellRunResult> = {}
     latestCellResults.forEach((item) => {
       nextResults[item.cell_id] = item

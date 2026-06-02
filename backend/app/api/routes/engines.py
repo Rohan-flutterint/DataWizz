@@ -58,6 +58,7 @@ def create_notebook(payload: NotebookDocumentCreateRequest, db: Session = Depend
         engine_id=payload.engine_id,
         description=payload.description,
         cells_json=[cell.model_dump() for cell in payload.cells_json],
+        latest_cell_results_json=[],
     )
     db.add(record)
     try:
@@ -97,6 +98,8 @@ def update_notebook(
     notebook.engine_id = payload.engine_id
     notebook.description = payload.description
     notebook.cells_json = [cell.model_dump() for cell in payload.cells_json]
+    valid_cell_ids = {cell.id for cell in payload.cells_json}
+    notebook.latest_cell_results_json = [item for item in (notebook.latest_cell_results_json or []) if item.get("cell_id") in valid_cell_ids]
     try:
         db.commit()
     except IntegrityError as exc:
@@ -116,6 +119,7 @@ def duplicate_notebook(notebook_id: str, db: Session = Depends(get_db)) -> Noteb
         engine_id=notebook.engine_id,
         description=notebook.description,
         cells_json=list(notebook.cells_json or []),
+        latest_cell_results_json=[],
     )
     db.add(duplicate)
     try:
