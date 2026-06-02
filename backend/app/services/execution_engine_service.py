@@ -88,9 +88,48 @@ class ExecutionEngineService:
         delta_tables: list[DeltaTableModel],
         limit: int = 200,
     ) -> tuple[NotebookRun, list[dict[str, Any]]]:
+        return self.execute_saved_notebook_range(
+            notebook,
+            db=db,
+            uploaded_files=uploaded_files,
+            delta_tables=delta_tables,
+            limit=limit,
+        )
+
+    def execute_saved_notebook_range(
+        self,
+        notebook: NotebookDocument,
+        *,
+        db: Session,
+        uploaded_files: list[UploadedFile],
+        delta_tables: list[DeltaTableModel],
+        start_cell_id: str | None = None,
+        end_cell_id: str | None = None,
+        limit: int = 200,
+    ) -> tuple[NotebookRun, list[dict[str, Any]]]:
         engine = self.get_engine(notebook.engine_id)
         if not engine["available"]:
             raise ValueError(engine["availability_reason"] or f"{engine['label']} is not available in this environment.")
+
+        cells = notebook.cells_json or []
+        if not cells:
+            raise ValueError("This notebook has no cells to execute.")
+
+        start_index = 0
+        if start_cell_id:
+            matches = [index for index, cell in enumerate(cells) if cell.get("id") == start_cell_id]
+            if not matches:
+                raise ValueError(f"Notebook cell '{start_cell_id}' was not found.")
+            start_index = matches[0]
+
+        end_index = len(cells) - 1
+        if end_cell_id:
+            matches = [index for index, cell in enumerate(cells) if cell.get("id") == end_cell_id]
+            if not matches:
+                raise ValueError(f"Notebook cell '{end_cell_id}' was not found.")
+            end_index = matches[0]
+            if end_index < start_index:
+                raise ValueError("Notebook execution range is invalid because the end cell appears before the start cell.")
 
         context = self._build_source_context(uploaded_files, delta_tables)
         runtime = self._build_runtime(
@@ -117,7 +156,12 @@ class ExecutionEngineService:
         run_error: str | None = None
 
         try:
-            for index, cell in enumerate(notebook.cells_json or [], start=1):
+            for cell in cells[:start_index]:
+                if not cell.get("code"):
+                    continue
+                self._execute_runtime_cell(runtime, cell["code"], db, limit)
+
+            for index, cell in enumerate(cells[start_index : end_index + 1], start=start_index + 1):
                 if not cell.get("code"):
                     continue
                 result = self._execute_runtime_cell(runtime, cell["code"], db, limit)
@@ -149,8 +193,11 @@ class ExecutionEngineService:
             run.run_summary = {
                 "notebook_name": notebook.name,
                 "engine_id": notebook.engine_id,
-                "cell_count": len(notebook.cells_json or []),
+                "cell_count": len(cells),
                 "completed_cells": len(cell_results),
+                "primed_cells": start_index,
+                "start_cell_id": cells[start_index]["id"],
+                "end_cell_id": cells[end_index]["id"],
                 "cell_results": cell_results,
             }
             if run_error:
