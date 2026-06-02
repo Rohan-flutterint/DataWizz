@@ -9,6 +9,7 @@ RUNTIME_DIR="$ROOT_DIR/.runtime"
 
 MODE="${1:-auto}"
 PROFILE="${2:-}"
+RESTART_FLAG="${3:-}"
 
 mkdir -p "$RUNTIME_DIR"
 
@@ -23,12 +24,26 @@ require_cmd() {
   fi
 }
 
+pid_is_running() {
+  local pid="${1:-}"
+  [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1
+}
+
 port_in_use() {
   lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
 }
 
 print_port_owner() {
   lsof -nP -iTCP:"$1" -sTCP:LISTEN || true
+}
+
+http_ready() {
+  local url="$1"
+  curl --silent --show-error --max-time 1 --output /dev/null "$url" >/dev/null 2>&1
+}
+
+should_force_restart() {
+  [[ "$PROFILE" == "--restart" || "$RESTART_FLAG" == "--restart" ]]
 }
 
 release_port() {
@@ -112,6 +127,7 @@ start_local() {
   require_cmd python3
   require_cmd npm
   require_cmd lsof
+  require_cmd curl
 
   ensure_backend_env
   ensure_frontend_env
@@ -122,33 +138,64 @@ start_local() {
   local frontend_pid_file="$RUNTIME_DIR/frontend.pid"
   local backend_port=8000
   local frontend_port=5173
+  local backend_url="http://localhost:$backend_port/docs"
+  local frontend_url="http://localhost:$frontend_port"
+  local backend_started=false
+  local frontend_started=false
 
-  release_port "$backend_port"
-  release_port "$frontend_port"
+  if should_force_restart; then
+    log "Force restart requested. Releasing local ports before launch."
+    release_port "$backend_port"
+    release_port "$frontend_port"
+  fi
 
-  log "Starting backend on http://localhost:$backend_port using SQLite for local demo mode"
-  (
-    cd "$BACKEND_DIR"
-    source .venv/bin/activate
-    DATABASE_URL=sqlite:///./local.db \
-      uvicorn app.main:app --reload --host 0.0.0.0 --port "$backend_port"
-  ) >"$backend_log" 2>&1 &
-  echo $! >"$backend_pid_file"
+  if port_in_use "$backend_port"; then
+    if http_ready "$backend_url"; then
+      log "Backend already running at $backend_url. Reusing existing process."
+    else
+      log "Backend port $backend_port is occupied but not healthy. Restarting backend."
+      release_port "$backend_port"
+    fi
+  fi
 
-  log "Starting frontend on http://localhost:$frontend_port"
-  (
-    cd "$FRONTEND_DIR"
-    npm run dev -- --host 0.0.0.0 --port "$frontend_port" --strictPort
-  ) >"$frontend_log" 2>&1 &
-  echo $! >"$frontend_pid_file"
+  if port_in_use "$frontend_port"; then
+    if http_ready "$frontend_url"; then
+      log "Frontend already running at $frontend_url. Reusing existing process."
+    else
+      log "Frontend port $frontend_port is occupied but not healthy. Restarting frontend."
+      release_port "$frontend_port"
+    fi
+  fi
+
+  if ! port_in_use "$backend_port"; then
+    log "Starting backend on http://localhost:$backend_port using SQLite for local demo mode"
+    (
+      cd "$BACKEND_DIR"
+      source .venv/bin/activate
+      DATABASE_URL=sqlite:///./local.db \
+        uvicorn app.main:app --reload --host 0.0.0.0 --port "$backend_port"
+    ) >"$backend_log" 2>&1 &
+    echo $! >"$backend_pid_file"
+    backend_started=true
+  fi
+
+  if ! port_in_use "$frontend_port"; then
+    log "Starting frontend on http://localhost:$frontend_port"
+    (
+      cd "$FRONTEND_DIR"
+      npm run dev -- --host 0.0.0.0 --port "$frontend_port" --strictPort
+    ) >"$frontend_log" 2>&1 &
+    echo $! >"$frontend_pid_file"
+    frontend_started=true
+  fi
 
   cleanup() {
     log "Stopping local services"
-    if [[ -f "$backend_pid_file" ]]; then
+    if [[ "$backend_started" == true && -f "$backend_pid_file" ]]; then
       kill "$(cat "$backend_pid_file")" >/dev/null 2>&1 || true
       rm -f "$backend_pid_file"
     fi
-    if [[ -f "$frontend_pid_file" ]]; then
+    if [[ "$frontend_started" == true && -f "$frontend_pid_file" ]]; then
       kill "$(cat "$frontend_pid_file")" >/dev/null 2>&1 || true
       rm -f "$frontend_pid_file"
     fi
@@ -162,6 +209,12 @@ start_local() {
   log "API Docs:  http://localhost:$backend_port/docs"
   log "Backend log:  $backend_log"
   log "Frontend log: $frontend_log"
+  if [[ "$backend_started" == false && "$frontend_started" == false ]]; then
+    log "Both services were already healthy. Nothing was restarted."
+  fi
+  if [[ "$backend_started" == false || "$frontend_started" == false ]]; then
+    log "Use ./run.sh local --restart if you want to force a full restart."
+  fi
   log "Press Ctrl+C to stop both services"
 
   wait
@@ -175,6 +228,7 @@ Usage:
   ./run.sh docker
   ./run.sh docker superset
   ./run.sh local
+  ./run.sh local --restart
 
 Modes:
   auto    Use Docker if available, otherwise run local demo mode

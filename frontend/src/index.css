@@ -21,6 +21,9 @@ body {
     linear-gradient(90deg, rgba(252, 252, 253, 1), rgba(245, 245, 247, 1));
   color: #111827;
   font-family: 'IBM Plex Sans', sans-serif;
+  transition:
+    background 180ms ease,
+    color 180ms ease;
 }
 
 #root {
@@ -37,4 +40,123 @@ a {
 
 .react-flow__attribution {
   display: none;
+}
+
+html.theme-dark {
+  color-scheme: dark;
+}
+
+html.theme-dark body {
+  background:
+    radial-gradient(circle at top left, rgba(246, 242, 74, 0.12), transparent 24%),
+    radial-gradient(circle at 85% 12%, rgba(255, 255, 255, 0.05), transparent 18%),
+    linear-gradient(180deg, #0b0b0b 0%, #101010 100%);
+  color: #f8fafc;
+}
+
+html.theme-dark .ui-panel {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+html.theme-dark .ui-page-header-eyebrow {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.56);
+}
+
+html.theme-dark .ui-page-header-title {
+  color: #ffffff;
+}
+
+html.theme-dark .ui-page-header-description {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+html.theme-dark .ui-input,
+html.theme-dark .ui-select,
+html.theme-dark .ui-textarea {
+  background: #0d0d0d;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+html.theme-dark .ui-input::placeholder,
+html.theme-dark .ui-textarea::placeholder {
+  color: rgba(255, 255, 255, 0.34);
+}
+
+html.theme-dark .ui-input:focus,
+html.theme-dark .ui-select:focus,
+html.theme-dark .ui-textarea:focus {
+  border-color: #f6f24a;
+  box-shadow: 0 0 0 2px rgba(246, 242, 74, 0.14);
+}
+
+html.theme-dark .bg-white,
+html.theme-dark .bg-slate-50,
+html.theme-dark .bg-slate-50\/80,
+html.theme-dark .bg-slate-50\/70,
+html.theme-dark .bg-slate-50\/60,
+html.theme-dark .bg-slate-50\/50,
+html.theme-dark .bg-white\/80 {
+  background-color: rgba(255, 255, 255, 0.035) !important;
+}
+
+html.theme-dark .bg-slate-100,
+html.theme-dark .bg-white\/5 {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+html.theme-dark .border-slate-200,
+html.theme-dark .border-slate-100,
+html.theme-dark .border-dashed.border-slate-200 {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+html.theme-dark .text-slate-950,
+html.theme-dark .text-slate-900,
+html.theme-dark .text-ink {
+  color: #ffffff !important;
+}
+
+html.theme-dark .text-slate-800,
+html.theme-dark .text-slate-700,
+html.theme-dark .text-slate-600,
+html.theme-dark .text-slate-500,
+html.theme-dark .text-slate-400,
+html.theme-dark .text-slate,
+html.theme-dark .text-slate\/75,
+html.theme-dark .text-slate\/70,
+html.theme-dark .text-slate\/55,
+html.theme-dark .text-slate\/60,
+html.theme-dark .text-slate\/50 {
+  color: rgba(226, 232, 240, 0.72) !important;
+}
+
+html.theme-dark .hover\:bg-slate-50:hover,
+html.theme-dark .hover\:bg-slate-100:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+html.theme-dark .hover\:border-slate-200:hover,
+html.theme-dark .hover\:border-slate-300:hover {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+}
+
+html.theme-dark .shadow-sm,
+html.theme-dark .shadow-xl,
+html.theme-dark .shadow-2xl,
+html.theme-dark .shadow-panel {
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32) !important;
+}
+
+html.theme-dark .react-flow__node {
+  color: #ffffff;
+}
+
+html.theme-dark ::selection {
+  background: rgba(246, 242, 74, 0.28);
+  color: #ffffff;
 }

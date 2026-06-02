@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { Bell, Database, LayoutDashboard, LineChart, LogOut, Logs, PlaySquare, Search, Settings2, Sparkles, TableProperties, Workflow } from 'lucide-react'
+import { Bell, Database, LayoutDashboard, LineChart, LogOut, Logs, MoonStar, PlaySquare, Search, Settings2, Sparkles, SunMedium, TableProperties, Workflow } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/auth-context'
 import { api } from '../lib/api'
 import { cn, formatDate } from '../lib/utils'
+import { useTheme } from '../theme/theme-context'
 
 const navGroups = [
   {
@@ -45,6 +46,7 @@ function kindTone(kind: string) {
 
 export function AppShell() {
   const { session, logout } = useAuth()
+  const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
   const location = useLocation()
   const searchRef = useRef<HTMLDivElement | null>(null)
@@ -81,31 +83,45 @@ export function AppShell() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f5f7]">
+    <div className={cn('app-shell-root min-h-screen', theme === 'dark' ? 'bg-[#0b0b0b]' : 'bg-[#f5f5f7]')}>
       <div className="flex min-h-screen">
-        <aside className="hidden w-[292px] flex-col border-r border-slate-200 bg-white lg:flex">
-          <div className="border-b border-slate-200 px-6 py-5">
+        <aside
+          className={cn(
+            'app-sidebar hidden w-[292px] flex-col lg:flex',
+            theme === 'dark' ? 'border-r border-white/10 bg-[#111111] text-white' : 'border-r border-slate-200 bg-white',
+          )}
+        >
+          <div className={cn('px-6 py-5', theme === 'dark' ? 'border-b border-white/10' : 'border-b border-slate-200')}>
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-md bg-[#ff3621] font-display text-lg font-semibold text-white">D</div>
+              <div className={cn('flex h-9 w-9 items-center justify-center rounded-md font-display text-lg font-semibold', theme === 'dark' ? 'bg-[#f6f24a] text-black' : 'bg-[#ff3621] text-white')}>D</div>
               <div>
-                <p className="font-display text-xl font-semibold text-slate-950">DataWizz</p>
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Lakehouse Platform</p>
+                <p className={cn('font-display text-xl font-semibold', theme === 'dark' ? 'text-white' : 'text-slate-950')}>DataWizz</p>
+                <p className={cn('text-xs uppercase tracking-[0.18em]', theme === 'dark' ? 'text-white/45' : 'text-slate-500')}>Lakehouse Platform</p>
               </div>
             </div>
           </div>
 
           <div className="px-4 py-4">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Workspace</p>
-              <p className="mt-2 text-sm font-semibold text-slate-900">DataWizz Internal Demo</p>
-              <p className="mt-1 text-sm leading-6 text-slate-600">Databricks-inspired workspace for uploads, SQL, pipelines, and BI.</p>
+            <div
+              className={cn(
+                'rounded-lg px-4 py-3',
+                theme === 'dark' ? 'border border-white/10 bg-white/[0.03]' : 'border border-slate-200 bg-slate-50',
+              )}
+            >
+              <p className={cn('text-[11px] font-semibold uppercase tracking-[0.22em]', theme === 'dark' ? 'text-white/45' : 'text-slate-500')}>Workspace</p>
+              <p className={cn('mt-2 text-sm font-semibold', theme === 'dark' ? 'text-white' : 'text-slate-900')}>DataWizz Internal Demo</p>
+              <p className={cn('mt-1 text-sm leading-6', theme === 'dark' ? 'text-white/68' : 'text-slate-600')}>
+                {theme === 'dark'
+                  ? 'ClickHouse-inspired dark workspace for uploads, SQL, pipelines, and BI.'
+                  : 'Databricks-inspired workspace for uploads, SQL, pipelines, and BI.'}
+              </p>
             </div>
           </div>
 
           <div className="flex-1 space-y-6 overflow-y-auto px-4 pb-5">
             {navGroups.map((group) => (
               <div key={group.title}>
-                <p className="mb-3 px-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">{group.title}</p>
+                <p className={cn('mb-3 px-2 text-[11px] font-semibold uppercase tracking-[0.22em]', theme === 'dark' ? 'text-white/42' : 'text-slate-500')}>{group.title}</p>
                 <div className="space-y-1.5">
                   {group.items.map((item) => (
                     <NavLink
@@ -115,7 +131,13 @@ export function AppShell() {
                       className={({ isActive }) =>
                         cn(
                           'flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition',
-                          isActive ? 'bg-[#fff1ef] text-[#c62e1a]' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
+                          theme === 'dark'
+                            ? isActive
+                              ? 'bg-[#f6f24a] text-black'
+                              : 'text-white/72 hover:bg-white/[0.05] hover:text-white'
+                            : isActive
+                              ? 'bg-[#fff1ef] text-[#c62e1a]'
+                              : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
                         )
                       }
                     >
@@ -128,12 +150,23 @@ export function AppShell() {
             ))}
           </div>
 
-          <div className="border-t border-slate-200 px-4 py-4">
-            <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700">
-              <p className="font-semibold text-slate-900">Demo Mode</p>
+          <div className={cn('px-4 py-4', theme === 'dark' ? 'border-t border-white/10' : 'border-t border-slate-200')}>
+            <div
+              className={cn(
+                'rounded-lg p-4 text-sm',
+                theme === 'dark' ? 'border border-white/10 bg-white/[0.03] text-white/72' : 'border border-slate-200 bg-white text-slate-700',
+              )}
+            >
+              <p className={cn('font-semibold', theme === 'dark' ? 'text-white' : 'text-slate-900')}>Demo Mode</p>
               <p className="mt-2 leading-6">Local-first stack with DuckDB, Delta Lake, PostgreSQL metadata, and MinIO-ready storage paths.</p>
             </div>
-            <NavLink to="/settings" className="mt-3 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-950">
+            <NavLink
+              to="/settings"
+              className={cn(
+                'mt-3 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition',
+                theme === 'dark' ? 'text-white/72 hover:bg-white/[0.05] hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
+              )}
+            >
               <Settings2 className="h-4 w-4" />
               Settings
             </NavLink>
@@ -141,11 +174,11 @@ export function AppShell() {
         </aside>
 
         <div className="flex min-h-screen flex-1 flex-col">
-          <header className="border-b border-slate-200 bg-[#111827] px-5 py-3 text-white">
+          <header className={cn('app-topbar px-5 py-3 text-white', theme === 'dark' ? 'border-b border-white/10 bg-[#101010]' : 'border-b border-slate-200 bg-[#111827]')}>
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-4">
                 <div className="lg:hidden">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-[#ff3621] font-display text-lg font-semibold text-white">D</div>
+                  <div className={cn('flex h-9 w-9 items-center justify-center rounded-md font-display text-lg font-semibold', theme === 'dark' ? 'bg-[#f6f24a] text-black' : 'bg-[#ff3621] text-white')}>D</div>
                 </div>
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/55">Workspace</p>
@@ -155,7 +188,12 @@ export function AppShell() {
 
               <div className="hidden max-w-xl flex-1 items-center justify-center md:flex">
                 <div ref={searchRef} className="relative w-full max-w-xl">
-                  <div className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                  <div
+                    className={cn(
+                      'app-search-box flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm',
+                      theme === 'dark' ? 'border border-white/10 bg-white/[0.04] text-white/75' : 'border border-white/10 bg-white/5 text-white/75',
+                    )}
+                  >
                     <Search className="h-4 w-4" />
                     <input
                       value={search}
@@ -175,16 +213,21 @@ export function AppShell() {
                   </div>
 
                   {isSearchOpen && search.trim().length >= 2 ? (
-                    <div className="absolute inset-x-0 top-[calc(100%+10px)] z-30 rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 shadow-2xl">
+                    <div
+                      className={cn(
+                        'app-search-panel absolute inset-x-0 top-[calc(100%+10px)] z-30 rounded-2xl p-3 shadow-2xl',
+                        theme === 'dark' ? 'border border-white/10 bg-[#121212] text-white' : 'border border-slate-200 bg-white text-slate-900',
+                      )}
+                    >
                       {searchQuery.isLoading ? (
-                        <p className="px-3 py-3 text-sm text-slate-600">Searching the workspace...</p>
+                        <p className={cn('px-3 py-3 text-sm', theme === 'dark' ? 'text-white/60' : 'text-slate-600')}>Searching the workspace...</p>
                       ) : searchResults.length ? (
                         <div className="space-y-2">
                           <div className="flex items-center justify-between px-3 pb-1 pt-1">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.22em]" style={{ color: '#64748b' }}>
+                            <p className={cn('text-[11px] font-semibold uppercase tracking-[0.22em]', theme === 'dark' ? 'text-white/45' : 'text-slate-500')}>
                               Search Results
                             </p>
-                            <span className="text-xs" style={{ color: '#64748b' }}>
+                            <span className={cn('text-xs', theme === 'dark' ? 'text-white/45' : 'text-slate-500')}>
                               {searchResults.length} matches
                             </span>
                           </div>
@@ -194,20 +237,25 @@ export function AppShell() {
                               key={`${result.kind}-${result.id}`}
                               type="button"
                               onClick={() => navigateToResult(result.route)}
-                              className="flex w-full items-start gap-3 rounded-2xl border border-transparent bg-white px-3 py-3 text-left text-slate-900 transition hover:border-slate-200 hover:bg-slate-50"
+                              className={cn(
+                                'flex w-full items-start gap-3 rounded-2xl border px-3 py-3 text-left transition',
+                                theme === 'dark'
+                                  ? 'border-transparent bg-white/[0.03] text-white hover:border-white/10 hover:bg-white/[0.06]'
+                                  : 'border-transparent bg-white text-slate-900 hover:border-slate-200 hover:bg-slate-50',
+                              )}
                             >
                               <span className={`mt-0.5 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${kindTone(result.kind)}`}>
                                 {result.kind}
                               </span>
                               <div className="min-w-0 flex-1">
-                                <p className="truncate text-sm font-semibold" style={{ color: '#0f172a' }}>
+                                <p className={cn('truncate text-sm font-semibold', theme === 'dark' ? 'text-white' : 'text-slate-900')}>
                                   {result.title || 'Untitled asset'}
                                 </p>
-                                <p className="mt-1 line-clamp-2 text-sm leading-5" style={{ color: '#475569' }}>
+                                <p className={cn('mt-1 line-clamp-2 text-sm leading-5', theme === 'dark' ? 'text-white/65' : 'text-slate-600')}>
                                   {result.subtitle || result.route}
                                 </p>
                               </div>
-                              <span className="shrink-0 pl-2 text-xs uppercase tracking-[0.18em]" style={{ color: '#94a3b8' }}>
+                              <span className={cn('shrink-0 pl-2 text-xs uppercase tracking-[0.18em]', theme === 'dark' ? 'text-white/38' : 'text-slate-400')}>
                                 {formatDate(result.updated_at)}
                               </span>
                             </button>
@@ -215,7 +263,7 @@ export function AppShell() {
                           </div>
                         </div>
                       ) : (
-                        <p className="px-3 py-3 text-sm text-slate-600">No matching assets found for this search.</p>
+                        <p className={cn('px-3 py-3 text-sm', theme === 'dark' ? 'text-white/60' : 'text-slate-600')}>No matching assets found for this search.</p>
                       )}
                     </div>
                   ) : null}
@@ -223,6 +271,17 @@ export function AppShell() {
               </div>
 
               <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  className={cn(
+                    'rounded-lg p-2 transition',
+                    theme === 'dark' ? 'border border-[#f6f24a]/20 bg-[#f6f24a]/10 text-[#f6f24a]' : 'border border-white/10 bg-white/5 text-white/85',
+                  )}
+                  aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+                >
+                  {theme === 'dark' ? <SunMedium className="h-4 w-4" /> : <MoonStar className="h-4 w-4" />}
+                </button>
                 <button className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/80">
                   <Bell className="h-4 w-4" />
                 </button>
@@ -243,7 +302,7 @@ export function AppShell() {
             </div>
           </header>
 
-          <main className="flex-1 px-4 py-4 sm:px-6">
+          <main className={cn('app-main flex-1 px-4 py-4 sm:px-6', theme === 'dark' ? 'text-white' : '')}>
             <div className="mx-auto max-w-[1600px]">
               <Outlet />
             </div>

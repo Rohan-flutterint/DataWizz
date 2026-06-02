@@ -6,6 +6,7 @@ import { MonacoSqlEditor } from '../components/monaco-sql-editor'
 import { Button, Input, Label, PageHeader, Panel, Select } from '../components/ui'
 import { api } from '../lib/api'
 import { formatDate } from '../lib/utils'
+import { useTheme } from '../theme/theme-context'
 
 const defaultSql = `SELECT *\nFROM raw_sales\nLIMIT 25`
 
@@ -14,6 +15,7 @@ function toRawViewName(fileName: string) {
 }
 
 export function SqlWorkspacePage() {
+  const { theme } = useTheme()
   const queryClient = useQueryClient()
   const [searchParams] = useSearchParams()
   const [sql, setSql] = useState(defaultSql)
@@ -103,13 +105,18 @@ export function SqlWorkspacePage() {
             <Button tone="ghost" disabled={exportMutation.isPending} onClick={() => exportMutation.mutate('parquet')}>
               {exportMutation.isPending ? 'Exporting...' : 'Export Parquet'}
             </Button>
-            <Button
-              tone="secondary"
+            <button
+              type="button"
               disabled={deltaMutation.isPending}
               onClick={() => deltaMutation.mutate({ table_name: tableName, sql, mode: deltaMode, schema_name: 'analytics' })}
+              className="inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+              style={{
+                backgroundColor: theme === 'dark' ? '#f6f24a' : '#0f172a',
+                color: theme === 'dark' ? '#000000' : '#ffffff',
+              }}
             >
               {deltaMutation.isPending ? 'Writing...' : 'Write Delta'}
-            </Button>
+            </button>
           </>
         }
       />

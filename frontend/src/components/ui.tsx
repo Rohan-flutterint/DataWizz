@@ -21,14 +21,14 @@ export function PageHeader({
   actions?: ReactNode
 }) {
   return (
-    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="ui-page-header flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
       <div className="space-y-3">
-        <span className="inline-flex rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+        <span className="ui-page-header-eyebrow inline-flex rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
           {eyebrow}
         </span>
         <div className="space-y-2">
-          <h1 className="font-display text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{title}</h1>
-          <p className="max-w-3xl text-sm leading-6 text-slate-600 sm:text-[15px]">{description}</p>
+          <h1 className="ui-page-header-title font-display text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{title}</h1>
+          <p className="ui-page-header-description max-w-3xl text-sm leading-6 text-slate-600 sm:text-[15px]">{description}</p>
         </div>
       </div>
       {actions ? <div className="flex flex-wrap gap-3">{actions}</div> : null}
@@ -42,7 +42,7 @@ export function Panel({
   ...props
 }: PropsWithChildren<{ className?: string } & HTMLAttributes<HTMLDivElement>>) {
   return (
-    <div {...props} className={cn('rounded-xl border border-slate-200 bg-white p-5 shadow-sm', className)}>
+    <div {...props} className={cn('ui-panel rounded-xl border border-slate-200 bg-white p-5 shadow-sm', className)}>
       {children}
     </div>
   )
@@ -63,7 +63,7 @@ export function Button({
   return (
     <button
       className={cn(
-        'inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
+        'ui-button inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
         styles[tone],
         className,
       )}
@@ -79,7 +79,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={cn(
-        'w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#ff3621] focus:ring-2 focus:ring-[#ff3621]/10',
+        'ui-input w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#ff3621] focus:ring-2 focus:ring-[#ff3621]/10',
         props.className,
       )}
     />
@@ -91,7 +91,7 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
     <select
       {...props}
       className={cn(
-        'w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#ff3621] focus:ring-2 focus:ring-[#ff3621]/10',
+        'ui-select w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#ff3621] focus:ring-2 focus:ring-[#ff3621]/10',
         props.className,
       )}
     />
@@ -103,7 +103,7 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
     <textarea
       {...props}
       className={cn(
-        'w-full rounded-lg border border-slate-200 bg-white px-3.5 py-3 text-sm text-slate-900 outline-none transition focus:border-[#ff3621] focus:ring-2 focus:ring-[#ff3621]/10',
+        'ui-textarea w-full rounded-lg border border-slate-200 bg-white px-3.5 py-3 text-sm text-slate-900 outline-none transition focus:border-[#ff3621] focus:ring-2 focus:ring-[#ff3621]/10',
         props.className,
       )}
     />
