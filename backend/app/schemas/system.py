@@ -33,3 +33,33 @@ class SupersetHealthResponse(BaseModel):
     sample_connections: list[dict]
     sample_datasets: list[dict]
     setup: dict
+
+
+class DemoLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class DemoUserResponse(BaseModel):
+    name: str
+    email: str
+    role: str
+
+
+class DemoLoginResponse(BaseModel):
+    token: str
+    user: DemoUserResponse
+
+
+class GlobalSearchResult(BaseModel):
+    id: str
+    kind: str
+    title: str
+    subtitle: str
+    route: str
+    updated_at: str
+
+
+class GlobalSearchResponse(BaseModel):
+    query: str
+    items: list[GlobalSearchResult]

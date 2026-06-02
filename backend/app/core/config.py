@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = True
     scheduler_poll_interval_seconds: int = 30
     scheduler_timezone: str = "Asia/Kolkata"
+    demo_admin_email: str = "admin@datawizz.local"
+    demo_admin_password: str = "datawizz123"
+    demo_admin_name: str = "Demo Admin"
 
 
 @lru_cache

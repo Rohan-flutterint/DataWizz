@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { DataTable } from '../components/data-table'
 import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, StatCard, Textarea } from '../components/ui'
 import { api } from '../lib/api'
@@ -15,6 +15,7 @@ function freshnessTone(status?: string) {
 
 export function CatalogPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -23,6 +24,7 @@ export function CatalogPage() {
   const [tagsDraft, setTagsDraft] = useState('')
   const [lineageDraft, setLineageDraft] = useState('')
   const [statusMessage, setStatusMessage] = useState('Select a curated table to inspect governance metadata, ownership, freshness, and lineage hints.')
+  const appliedSearchTableIdRef = useRef<string | null>(null)
   const tablesQuery = useQuery({ queryKey: ['tables'], queryFn: api.listTables })
   const previewQuery = useQuery({
     queryKey: ['tables', selectedTableId, 'preview'],
@@ -52,6 +54,17 @@ export function CatalogPage() {
   const tables = tablesQuery.data?.items ?? []
 
   useEffect(() => {
+    const requestedTableId = searchParams.get('tableId')
+    if (
+      requestedTableId &&
+      appliedSearchTableIdRef.current !== requestedTableId &&
+      tables.some((table) => table.id === requestedTableId)
+    ) {
+      appliedSearchTableIdRef.current = requestedTableId
+      setSelectedTableId(requestedTableId)
+      return
+    }
+
     if (!tables.length) {
       setSelectedTableId(null)
       return
@@ -60,7 +73,7 @@ export function CatalogPage() {
     if (!selectedTableId || !tables.some((table) => table.id === selectedTableId)) {
       setSelectedTableId(tables[0].id)
     }
-  }, [selectedTableId, tables])
+  }, [searchParams, selectedTableId, tables])
 
   const schemaOptions = useMemo(
     () => ['all', ...Array.from(new Set(tables.map((table) => table.schema_name))).sort()],

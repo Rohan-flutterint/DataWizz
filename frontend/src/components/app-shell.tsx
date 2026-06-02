@@ -1,6 +1,10 @@
-import { Bell, Database, LayoutDashboard, LineChart, Logs, PlaySquare, Search, Settings2, Sparkles, TableProperties, Workflow } from 'lucide-react'
-import { NavLink, Outlet } from 'react-router-dom'
-import { cn } from '../lib/utils'
+import { useQuery } from '@tanstack/react-query'
+import { Bell, Database, LayoutDashboard, LineChart, LogOut, Logs, PlaySquare, Search, Settings2, Sparkles, TableProperties, Workflow } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useAuth } from '../auth/auth-context'
+import { api } from '../lib/api'
+import { cn, formatDate } from '../lib/utils'
 
 const navGroups = [
   {
@@ -30,7 +34,52 @@ const navGroups = [
   },
 ]
 
+function kindTone(kind: string) {
+  if (kind === 'file') return 'bg-slate-100 text-slate-700'
+  if (kind === 'table') return 'bg-cyan-50 text-lagoon'
+  if (kind === 'pipeline') return 'bg-orange-50 text-orange-700'
+  if (kind === 'dashboard') return 'bg-emerald-50 text-emerald-700'
+  if (kind === 'chart') return 'bg-violet-50 text-violet-700'
+  return 'bg-slate-100 text-slate-700'
+}
+
 export function AppShell() {
+  const { session, logout } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const searchRef = useRef<HTMLDivElement | null>(null)
+  const [search, setSearch] = useState('')
+  const [isSearchOpen, setIsSearchOpen] = useState(false)
+  const searchQuery = useQuery({
+    queryKey: ['global-search', search],
+    queryFn: () => api.globalSearch(search),
+    enabled: search.trim().length >= 2,
+  })
+
+  const searchResults = searchQuery.data?.items ?? []
+  const firstResult = useMemo(() => searchResults[0] ?? null, [searchResults])
+
+  useEffect(() => {
+    setIsSearchOpen(false)
+  }, [location.pathname, location.search])
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setIsSearchOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const navigateToResult = (route: string) => {
+    setIsSearchOpen(false)
+    setSearch('')
+    navigate(route)
+  }
+
   return (
     <div className="min-h-screen bg-[#f5f5f7]">
       <div className="flex min-h-screen">
@@ -103,17 +152,93 @@ export function AppShell() {
                   <p className="font-medium">DataWizz / Analytics Engineering</p>
                 </div>
               </div>
+
               <div className="hidden max-w-xl flex-1 items-center justify-center md:flex">
-                <div className="flex w-full max-w-xl items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
-                  <Search className="h-4 w-4" />
-                  <span>Search files, tables, pipelines, dashboards</span>
+                <div ref={searchRef} className="relative w-full max-w-xl">
+                  <div className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
+                    <Search className="h-4 w-4" />
+                    <input
+                      value={search}
+                      onFocus={() => setIsSearchOpen(true)}
+                      onChange={(event) => {
+                        setSearch(event.target.value)
+                        setIsSearchOpen(true)
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && firstResult) {
+                          navigateToResult(firstResult.route)
+                        }
+                      }}
+                      placeholder="Search files, tables, pipelines, dashboards"
+                      className="w-full bg-transparent text-white placeholder:text-white/55 focus:outline-none"
+                    />
+                  </div>
+
+                  {isSearchOpen && search.trim().length >= 2 ? (
+                    <div className="absolute inset-x-0 top-[calc(100%+10px)] z-30 rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 shadow-2xl">
+                      {searchQuery.isLoading ? (
+                        <p className="px-3 py-3 text-sm text-slate-600">Searching the workspace...</p>
+                      ) : searchResults.length ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between px-3 pb-1 pt-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.22em]" style={{ color: '#64748b' }}>
+                              Search Results
+                            </p>
+                            <span className="text-xs" style={{ color: '#64748b' }}>
+                              {searchResults.length} matches
+                            </span>
+                          </div>
+                          <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+                            {searchResults.map((result) => (
+                            <button
+                              key={`${result.kind}-${result.id}`}
+                              type="button"
+                              onClick={() => navigateToResult(result.route)}
+                              className="flex w-full items-start gap-3 rounded-2xl border border-transparent bg-white px-3 py-3 text-left text-slate-900 transition hover:border-slate-200 hover:bg-slate-50"
+                            >
+                              <span className={`mt-0.5 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${kindTone(result.kind)}`}>
+                                {result.kind}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-semibold" style={{ color: '#0f172a' }}>
+                                  {result.title || 'Untitled asset'}
+                                </p>
+                                <p className="mt-1 line-clamp-2 text-sm leading-5" style={{ color: '#475569' }}>
+                                  {result.subtitle || result.route}
+                                </p>
+                              </div>
+                              <span className="shrink-0 pl-2 text-xs uppercase tracking-[0.18em]" style={{ color: '#94a3b8' }}>
+                                {formatDate(result.updated_at)}
+                              </span>
+                            </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="px-3 py-3 text-sm text-slate-600">No matching assets found for this search.</p>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               </div>
+
               <div className="flex items-center gap-3">
                 <button className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/80">
                   <Bell className="h-4 w-4" />
                 </button>
-                <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium">Demo Admin</div>
+                <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-white">{session?.user.name ?? 'Workspace User'}</p>
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-white/50">{session?.user.role ?? 'admin'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={logout}
+                    className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/75 transition hover:bg-white/10 hover:text-white"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             </div>
           </header>

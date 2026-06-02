@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Edge, Node } from 'reactflow'
+import { useSearchParams } from 'react-router-dom'
 import { PipelineBuilder } from '../components/pipeline-builder'
 import { PageHeader, Panel, Select } from '../components/ui'
 import { api } from '../lib/api'
@@ -30,6 +31,7 @@ function makeStarterNodes(): Node[] {
 }
 
 export function PipelineBuilderPage() {
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const pipelinesQuery = useQuery({ queryKey: ['pipelines'], queryFn: api.listPipelines })
   const filesQuery = useQuery({ queryKey: ['files'], queryFn: api.listFiles })
@@ -46,8 +48,20 @@ export function PipelineBuilderPage() {
   ])
   const [statusMessage, setStatusMessage] = useState('Start from a starter template or build from scratch, then use the node guardrails on the right to tighten joins and aggregates before running.')
   const [dagCode, setDagCode] = useState('')
+  const appliedSearchPipelineIdRef = useRef<string | null>(null)
 
   useEffect(() => {
+    const requestedPipelineId = searchParams.get('pipelineId')
+    if (
+      requestedPipelineId &&
+      appliedSearchPipelineIdRef.current !== requestedPipelineId &&
+      pipelinesQuery.data?.items.some((item) => item.id === requestedPipelineId)
+    ) {
+      appliedSearchPipelineIdRef.current = requestedPipelineId
+      setCurrentPipelineId(requestedPipelineId)
+      return
+    }
+
     const current = pipelinesQuery.data?.items.find((item) => item.id === currentPipelineId)
     if (!current) {
       setPipelineName('Sales Curated Pipeline')
@@ -74,7 +88,7 @@ export function PipelineBuilderPage() {
       })),
     )
     setEdges(current.definition_json.edges as Edge[])
-  }, [currentPipelineId, pipelinesQuery.data])
+  }, [currentPipelineId, pipelinesQuery.data, searchParams])
 
   const saveMutation = useMutation({
     mutationFn: async (payload: { name: string; description: string; nodes: Node[]; edges: Edge[] }) => {

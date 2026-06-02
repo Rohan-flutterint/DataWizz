@@ -95,6 +95,26 @@ export type JobLog = {
   updated_at: string
 }
 
+export type DemoUser = {
+  name: string
+  email: string
+  role: string
+}
+
+export type AuthSession = {
+  token: string
+  user: DemoUser
+}
+
+export type GlobalSearchResult = {
+  id: string
+  kind: string
+  title: string
+  subtitle: string
+  route: string
+  updated_at: string
+}
+
 export type PipelineRunDetail = {
   run: PipelineRun
   pipeline?: Pipeline
