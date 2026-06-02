@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import re
+import shutil
+import subprocess
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -9,11 +13,14 @@ from typing import Any
 
 import pandas as pd
 import pyarrow as pa
+from deltalake import DeltaTable as DeltaLakeTable
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models.catalog import DeltaTable as DeltaTableModel
 from app.models.catalog import UploadedFile
+from app.services.delta_service import DeltaService
 from app.services.duckdb_service import DuckDBService
 from app.utils.naming import slugify_identifier
 
@@ -22,6 +29,7 @@ class ExecutionEngineService:
     def __init__(self) -> None:
         self.settings = get_settings()
         self.duckdb_service = DuckDBService()
+        self.delta_service = DeltaService()
         self._spark_session: Any | None = None
 
     def list_engines(self) -> list[dict[str, Any]]:
@@ -43,6 +51,7 @@ class ExecutionEngineService:
         code: str,
         uploaded_files: list[UploadedFile],
         delta_tables: list[DeltaTableModel],
+        db: Session | None = None,
         limit: int = 200,
     ) -> dict[str, Any]:
         engine = self.get_engine(engine_id)
@@ -80,10 +89,10 @@ class ExecutionEngineService:
             }
 
         if engine_id == "spark":
-            return self._execute_spark_notebook(engine, code, uploaded_files, delta_tables, limit, context)
+            return self._execute_spark_notebook(engine, code, uploaded_files, delta_tables, db, limit, context)
 
         if engine_id == "datafusion":
-            return self._execute_datafusion_notebook(engine, code, uploaded_files, delta_tables, limit, context)
+            return self._execute_datafusion_notebook(engine, code, uploaded_files, delta_tables, db, limit, context)
 
         raise ValueError(f"Execution for engine '{engine_id}' is not implemented.")
 
@@ -109,22 +118,30 @@ class ExecutionEngineService:
 
     def _build_spark_descriptor(self) -> dict[str, Any]:
         pyspark_installed = self._module_available("pyspark")
+        java_runtime = self._resolve_spark_java_runtime()
+        java_available = java_runtime["available"]
+        spark_ready = pyspark_installed and java_available
+        reason = None
+        if not pyspark_installed:
+            reason = "PySpark is not installed in this local environment yet. Install pyspark to enable live Spark notebook execution."
+        elif not java_available:
+            reason = java_runtime["reason"]
         return {
             "id": "spark",
             "label": "Spark Notebook",
             "vendor": "Apache Spark",
             "runtime_language": "python",
-            "available": pyspark_installed,
-            "status": "available" if pyspark_installed else "not_installed",
+            "available": spark_ready,
+            "status": "available" if spark_ready else "not_installed" if not pyspark_installed else "runtime_missing",
             "summary": "PySpark-style notebook execution for distributed transformation logic.",
-            "description": "Use Python notebook cells with Spark SQL or DataFrame APIs, similar to a Databricks Spark notebook workflow.",
-            "availability_reason": None if pyspark_installed else "PySpark is not installed in this local environment yet. Install pyspark to enable live Spark notebook execution.",
+            "description": "Use Python notebook cells with Spark SQL or DataFrame APIs, similar to a Databricks Spark notebook workflow. Raw sources and curated Delta tables are registered automatically for local execution.",
+            "availability_reason": reason,
             "supports_sql": True,
             "supports_python": True,
-            "supports_delta_read": False,
-            "supports_delta_write": False,
+            "supports_delta_read": spark_ready,
+            "supports_delta_write": spark_ready,
             "supports_local_files": True,
-            "notebook_ready": pyspark_installed,
+            "notebook_ready": spark_ready,
             "sample_code": (
                 "result = spark.sql(\"\"\"\n"
                 "SELECT region, SUM(revenue) AS total_revenue\n"
@@ -203,6 +220,7 @@ class ExecutionEngineService:
         code: str,
         uploaded_files: list[UploadedFile],
         delta_tables: list[DeltaTableModel],
+        db: Session | None,
         limit: int,
         context: dict[str, Any],
     ) -> dict[str, Any]:
@@ -217,9 +235,10 @@ class ExecutionEngineService:
             dataframe.createOrReplaceTempView(view_name)
 
         for table_record in delta_tables:
-            warnings.append(
-                f"Curated Delta table '{table_record.name}' was not auto-registered for Spark because Delta Lake Spark bindings are not configured in this demo runtime."
-            )
+            view_name = slugify_identifier(table_record.name)
+            arrow_table = DeltaLakeTable(table_record.storage_path).to_pyarrow_table()
+            dataframe = spark.createDataFrame(arrow_table.to_pandas())
+            dataframe.createOrReplaceTempView(view_name)
 
         namespace = {
             "spark": spark,
@@ -228,7 +247,7 @@ class ExecutionEngineService:
             "curated_views": context["curated_views"],
             "result": None,
         }
-        return self._execute_python_notebook(engine, code, namespace, limit, context, warnings)
+        return self._execute_python_notebook(engine, code, namespace, db, limit, context, warnings)
 
     def _execute_datafusion_notebook(
         self,
@@ -236,6 +255,7 @@ class ExecutionEngineService:
         code: str,
         uploaded_files: list[UploadedFile],
         delta_tables: list[DeltaTableModel],
+        db: Session | None,
         limit: int,
         context: dict[str, Any],
     ) -> dict[str, Any]:
@@ -268,17 +288,22 @@ class ExecutionEngineService:
             "curated_views": context["curated_views"],
             "result": None,
         }
-        return self._execute_python_notebook(engine, code, namespace, limit, context, warnings)
+        return self._execute_python_notebook(engine, code, namespace, db, limit, context, warnings)
 
     def _execute_python_notebook(
         self,
         engine: dict[str, Any],
         code: str,
         namespace: dict[str, Any],
+        db: Session | None,
         limit: int,
         context: dict[str, Any],
         warnings: list[str],
     ) -> dict[str, Any]:
+        namespace = {
+            **namespace,
+            "write_delta": self._build_write_delta_helper(db, namespace),
+        }
         stdout_buffer = StringIO()
         started = perf_counter()
         with redirect_stdout(stdout_buffer):
@@ -303,6 +328,39 @@ class ExecutionEngineService:
                 "metadata": context,
             },
         }
+
+    def _build_write_delta_helper(self, db: Session | None, namespace: dict[str, Any]):
+        def write_delta(
+            result: Any | None = None,
+            *,
+            table_name: str,
+            mode: str = "overwrite",
+            schema_name: str = "analytics",
+            description: str | None = None,
+        ) -> dict[str, Any]:
+            if db is None:
+                raise ValueError("Notebook Delta writes require a database session, but none was provided.")
+            materialized = result if result is not None else namespace.get("result")
+            if materialized is None:
+                raise ValueError("No notebook result is available to write. Assign a dataframe-like object to `result` or pass one into write_delta(...).")
+            arrow_table = self._to_arrow_table(materialized)
+            table = self.delta_service.write_table(
+                db,
+                table_name=table_name,
+                arrow_table=arrow_table,
+                mode=mode,
+                schema_name=schema_name,
+                description=description,
+                source_query=f"Notebook runtime write via {namespace.get('spark') and 'spark' or namespace.get('ctx') and 'datafusion' or 'python'}",
+            )
+            return {
+                "table_id": table.id,
+                "table_name": table.name,
+                "schema_name": table.schema_name,
+                "row_count": table.row_count,
+            }
+
+        return write_delta
 
     def _normalize_python_result(self, result: Any, limit: int) -> dict[str, Any]:
         if result is None:
@@ -394,12 +452,27 @@ class ExecutionEngineService:
 
     def _get_or_create_spark_session(self, spark_session_class: Any) -> Any:
         if self._spark_session is None:
+            java_runtime = self._resolve_spark_java_runtime()
+            if not java_runtime["available"]:
+                raise ValueError(java_runtime["reason"])
+            if java_runtime["java_home"]:
+                os.environ["JAVA_HOME"] = str(java_runtime["java_home"])
+                os.environ["PATH"] = f"{java_runtime['java_home']}/bin:{os.environ.get('PATH', '')}"
+            os.environ.setdefault("SPARK_LOCAL_IP", "127.0.0.1")
+            os.environ.setdefault("SPARK_LOCAL_HOSTNAME", "localhost")
+            warehouse_dir = Path(self.settings.temp_storage_path) / "spark-warehouse"
+            warehouse_dir.mkdir(parents=True, exist_ok=True)
             self._spark_session = (
                 spark_session_class.builder.master("local[*]")
                 .appName("DataWizz Engine Lab")
+                .config("spark.driver.host", "127.0.0.1")
+                .config("spark.driver.bindAddress", "127.0.0.1")
                 .config("spark.ui.enabled", "false")
+                .config("spark.sql.warehouse.dir", str(warehouse_dir))
+                .config("spark.sql.shuffle.partitions", "4")
                 .getOrCreate()
             )
+            self._spark_session.sparkContext.setLogLevel("WARN")
         return self._spark_session
 
     def _read_file_with_spark(self, spark: Any, file_record: UploadedFile) -> Any:
@@ -414,6 +487,89 @@ class ExecutionEngineService:
 
     def _module_available(self, module_name: str) -> bool:
         return importlib.util.find_spec(module_name) is not None
+
+    def _java_available(self) -> bool:
+        return shutil.which("java") is not None
+
+    def _resolve_spark_java_runtime(self) -> dict[str, Any]:
+        current_version = self._detect_java_major_version()
+        if current_version is not None and 11 <= current_version <= 21:
+            return {
+                "available": True,
+                "java_home": os.environ.get("JAVA_HOME"),
+                "version": current_version,
+                "reason": None,
+            }
+
+        fallback_home = self._find_supported_java_home()
+        if fallback_home:
+            fallback_version = self._detect_java_major_version(Path(fallback_home) / "bin" / "java")
+            return {
+                "available": True,
+                "java_home": fallback_home,
+                "version": fallback_version,
+                "reason": None,
+            }
+
+        if not self._java_available():
+            return {
+                "available": False,
+                "java_home": None,
+                "version": None,
+                "reason": "Java is not available on PATH, so Spark cannot start. Install a compatible local JRE/JDK (11, 17, or 21) or use the Docker backend image.",
+            }
+
+        return {
+            "available": False,
+            "java_home": None,
+            "version": current_version,
+            "reason": "The detected Java runtime is not compatible with local Spark execution. Install or select Java 11, 17, or 21, or use the Docker backend image.",
+        }
+
+    def _find_supported_java_home(self) -> str | None:
+        java_home_helper = Path("/usr/libexec/java_home")
+        if java_home_helper.exists():
+            for version in ("21", "17", "11"):
+                try:
+                    resolved = subprocess.check_output([str(java_home_helper), "-v", version], text=True).strip()
+                    if resolved:
+                        return resolved
+                except Exception:  # noqa: BLE001
+                    continue
+        java_home = os.environ.get("JAVA_HOME")
+        if java_home:
+            version = self._detect_java_major_version(Path(java_home) / "bin" / "java")
+            if version is not None and 11 <= version <= 21:
+                return java_home
+        return None
+
+    def _detect_java_major_version(self, java_bin: str | Path = "java") -> int | None:
+        try:
+            output = subprocess.check_output([str(java_bin), "-version"], stderr=subprocess.STDOUT, text=True)
+        except Exception:  # noqa: BLE001
+            return None
+        match = re.search(r'version "(?P<version>\d+)(?:\.(?P<minor>\d+))?', output)
+        if not match:
+            return None
+        major = int(match.group("version"))
+        if major == 1 and match.group("minor"):
+            return int(match.group("minor"))
+        return major
+
+    def _to_arrow_table(self, result: Any) -> pa.Table:
+        if isinstance(result, pa.Table):
+            return result
+        if isinstance(result, pd.DataFrame):
+            return pa.Table.from_pandas(result, preserve_index=False)
+        if hasattr(result, "toPandas"):
+            return pa.Table.from_pandas(result.toPandas(), preserve_index=False)
+        if hasattr(result, "to_pandas"):
+            return pa.Table.from_pandas(result.to_pandas(), preserve_index=False)
+        if isinstance(result, list):
+            return pa.Table.from_pylist(result)
+        if isinstance(result, dict):
+            return pa.Table.from_pylist([result])
+        raise ValueError(f"Cannot convert notebook result of type {type(result).__name__} into an Arrow table for Delta writing.")
 
 
 execution_engine_service = ExecutionEngineService()

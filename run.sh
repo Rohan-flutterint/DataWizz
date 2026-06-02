@@ -87,12 +87,14 @@ start_docker() {
 }
 
 ensure_backend_env() {
+  local deps_marker="$BACKEND_DIR/.venv/.deps-installed"
+
   if [[ ! -d "$BACKEND_DIR/.venv" ]]; then
     log "Creating backend virtual environment"
     python3 -m venv "$BACKEND_DIR/.venv"
   fi
 
-  if [[ ! -f "$BACKEND_DIR/.venv/.deps-installed" ]]; then
+  if [[ ! -f "$deps_marker" || "$BACKEND_DIR/pyproject.toml" -nt "$deps_marker" ]]; then
     log "Installing backend dependencies"
     (
       cd "$BACKEND_DIR"
