@@ -323,6 +323,50 @@ export type QueryResult = {
   execution_ms: number
 }
 
+export type ExecutionEngine = {
+  id: string
+  label: string
+  vendor: string
+  runtime_language: string
+  available: boolean
+  status: string
+  summary: string
+  description: string
+  availability_reason?: string
+  supports_sql: boolean
+  supports_python: boolean
+  supports_delta_read: boolean
+  supports_delta_write: boolean
+  supports_local_files: boolean
+  notebook_ready: boolean
+  sample_code: string
+}
+
+export type EngineCatalog = {
+  default_engine: string
+  items: ExecutionEngine[]
+}
+
+export type NotebookExecutionResult = {
+  engine_id: string
+  engine_label: string
+  status: string
+  language: string
+  execution_ms: number
+  columns: string[]
+  rows: Record<string, unknown>[]
+  row_count: number
+  stdout?: string | null
+  message?: string | null
+  warnings: string[]
+  metadata: Record<string, unknown>
+}
+
+export type NotebookExecutionResponse = {
+  engine: ExecutionEngine
+  result: NotebookExecutionResult
+}
+
 export type ReportSchedule = {
   id: string
   name: string

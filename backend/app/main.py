@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import bi, files, pipelines, queries, system, tables
+from app.api.routes import bi, engines, files, pipelines, queries, system, tables
 from app.core.config import get_settings
 from app.db.base import *  # noqa: F403
 from app.db.session import Base, engine
@@ -41,6 +41,7 @@ async def on_shutdown() -> None:
 
 
 app.include_router(system.router, prefix=settings.api_prefix)
+app.include_router(engines.router, prefix=settings.api_prefix)
 app.include_router(files.router, prefix=settings.api_prefix)
 app.include_router(queries.router, prefix=settings.api_prefix)
 app.include_router(tables.router, prefix=settings.api_prefix)

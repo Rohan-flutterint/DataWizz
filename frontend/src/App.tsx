@@ -8,6 +8,7 @@ import { DashboardPage } from './pages/dashboard'
 import { DashboardBuilderPage } from './pages/dashboard-builder'
 import { DashboardViewerPage } from './pages/dashboard-viewer'
 import { DatasetsPage } from './pages/datasets'
+import { EngineLabPage } from './pages/engine-lab'
 import { FileExplorerPage } from './pages/files'
 import { JobLogsPage } from './pages/logs'
 import { PipelineBuilderPage } from './pages/pipelines'
@@ -28,6 +29,7 @@ function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/files" element={<FileExplorerPage />} />
           <Route path="/sql" element={<SqlWorkspacePage />} />
+          <Route path="/engines" element={<EngineLabPage />} />
           <Route path="/catalog" element={<CatalogPage />} />
           <Route path="/pipelines" element={<PipelineBuilderPage />} />
           <Route path="/runs" element={<PipelineRunsPage />} />

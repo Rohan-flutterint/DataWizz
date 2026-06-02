@@ -5,17 +5,19 @@ export function MonacoSqlEditor({
   value,
   onChange,
   height = 320,
+  language = 'sql',
 }: {
   value: string
   onChange: (value: string) => void
   height?: number
+  language?: string
 }) {
   const { theme } = useTheme()
 
   return (
     <Editor
       height={height}
-      defaultLanguage="sql"
+      defaultLanguage={language}
       theme={theme === 'dark' ? 'vs-dark' : 'vs-light'}
       value={value}
       onChange={(next) => onChange(next ?? '')}

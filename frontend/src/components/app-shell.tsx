@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
-import { Bell, Database, LayoutDashboard, LineChart, LogOut, Logs, MoonStar, PlaySquare, Search, Settings2, Sparkles, SunMedium, TableProperties, Workflow } from 'lucide-react'
+import { Bell, Cpu, Database, LayoutDashboard, LineChart, LogOut, Logs, MoonStar, PlaySquare, Search, Settings2, Sparkles, SunMedium, TableProperties, Workflow } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/auth-context'
+import { useExecutionEngine } from '../engine/engine-context'
 import { api } from '../lib/api'
 import { cn, formatDate } from '../lib/utils'
 import { useTheme } from '../theme/theme-context'
@@ -14,6 +15,7 @@ const navGroups = [
       { label: 'Dashboard', to: '/', icon: LayoutDashboard, end: true },
       { label: 'File Explorer', to: '/files', icon: Database, end: true },
       { label: 'SQL Workspace', to: '/sql', icon: Sparkles, end: true },
+      { label: 'Engine Lab', to: '/engines', icon: Cpu, end: true },
       { label: 'Catalog', to: '/catalog', icon: TableProperties, end: true },
       { label: 'Pipeline Builder', to: '/pipelines', icon: Workflow, end: true },
       { label: 'Pipeline Runs', to: '/runs', icon: PlaySquare, end: true },
@@ -46,6 +48,7 @@ function kindTone(kind: string) {
 
 export function AppShell() {
   const { session, logout } = useAuth()
+  const { activeEngineId } = useExecutionEngine()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
   const location = useLocation()
@@ -114,6 +117,9 @@ export function AppShell() {
                 {theme === 'dark'
                   ? 'ClickHouse-inspired dark workspace for uploads, SQL, pipelines, and BI.'
                   : 'Databricks-inspired workspace for uploads, SQL, pipelines, and BI.'}
+              </p>
+              <p className={cn('mt-2 text-xs font-semibold uppercase tracking-[0.2em]', theme === 'dark' ? 'text-[#f6f24a]' : 'text-[#c62e1a]')}>
+                Active engine: {activeEngineId}
               </p>
             </div>
           </div>
