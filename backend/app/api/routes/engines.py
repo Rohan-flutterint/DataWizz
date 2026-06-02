@@ -27,6 +27,7 @@ def execute_notebook(payload: NotebookExecutionRequest, db: Session = Depends(ge
                 code=payload.code,
                 uploaded_files=db.query(UploadedFile).all(),
                 delta_tables=db.query(DeltaTable).all(),
+                db=db,
                 limit=payload.limit,
             )
         )
