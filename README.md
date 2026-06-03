@@ -7,26 +7,37 @@
 [![Workspace](https://img.shields.io/badge/workspace-available-7c3aed?style=flat-square)](http://localhost:5173)
 [![Backend](https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square)](./backend)
 [![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-2563eb?style=flat-square)](./frontend)
-[![Engine](https://img.shields.io/badge/query%20engine-DuckDB-f59e0b?style=flat-square)](./backend)
+[![Notebook Engines](https://img.shields.io/badge/notebook%20engines-DuckDB%20%7C%20Spark%20%7C%20DataFusion-f59e0b?style=flat-square)](./backend)
 [![Format](https://img.shields.io/badge/table%20format-Delta%20Lake-111827?style=flat-square)](./storage)
+[![Theme](https://img.shields.io/badge/theme-dark%20%2F%20light-f6f24a?style=flat-square)](./frontend)
 
 </div>
 
-DataWizz is a demo-ready internal data platform inspired by Databricks, Snowflake, ClickHouse Cloud, Airflow, Superset, and Metabase. It combines file ingestion, SQL exploration, Delta Lake publishing, low-code orchestration, and business dashboards in one local-first workspace.
+DataWizz is a demo-ready internal data platform inspired by Databricks, Snowflake, ClickHouse Cloud, Airflow, Superset, and Metabase. It combines file ingestion, SQL exploration, Delta Lake publishing, multi-engine notebooks, low-code orchestration, and business dashboards in one local-first workspace.
 
 The current version is intentionally built as a serious MVP rather than a toy demo:
 
 - Upload, preview, and profile raw files
 - Query raw and curated data with DuckDB
+- Run notebooks with DuckDB, PySpark, and DataFusion
 - Publish transformed outputs as Delta tables
 - Build and validate visual pipelines
 - Track runs, retries, and logs
 - Create semantic datasets, charts, dashboards, and scheduled reports
+- Switch between dark and light workspace themes
 - Run locally with one script or as a Docker demo stack
 
 ## Product Tour
 
 <table>
+  <tr>
+    <td colspan="2">
+      <img src="./docs/screenshots/login.png" alt="DataWizz login" />
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2"><strong>Workspace access</strong><br/>A polished dark-mode entry experience with demo credentials, platform positioning, and a more presentation-ready first impression.</td>
+  </tr>
   <tr>
     <td width="50%">
       <img src="./docs/screenshots/dashboard.png" alt="DataWizz dashboard" />
@@ -44,20 +55,24 @@ The current version is intentionally built as a serious MVP rather than a toy de
       <img src="./docs/screenshots/catalog.png" alt="DataWizz catalog" />
     </td>
     <td width="50%">
-      <img src="./docs/screenshots/pipeline-builder.png" alt="DataWizz pipeline builder" />
+      <img src="./docs/screenshots/engine-lab.png" alt="DataWizz engine lab" />
     </td>
   </tr>
   <tr>
     <td><strong>Curated catalog</strong><br/>Browse governed Delta assets with ownership, freshness, schema, and preview data.</td>
-    <td><strong>Pipeline builder</strong><br/>Design low-code flows, validate graph rules, schedule recurring runs, and export Airflow-style DAGs.</td>
+    <td><strong>Notebook runtime lab</strong><br/>Build saved multi-cell notebooks, switch between DuckDB, Spark, and DataFusion, insert source-aware snippets, and persist per-cell outputs.</td>
   </tr>
   <tr>
-    <td colspan="2">
+    <td width="50%">
+      <img src="./docs/screenshots/pipeline-builder.png" alt="DataWizz pipeline builder" />
+    </td>
+    <td width="50%">
       <img src="./docs/screenshots/dashboard-viewer.png" alt="DataWizz dashboard viewer" />
     </td>
   </tr>
   <tr>
-    <td colspan="2"><strong>BI dashboard layer</strong><br/>Publish chart-driven dashboards and turn curated Delta tables into stakeholder-ready reporting surfaces.</td>
+    <td><strong>Pipeline builder</strong><br/>Design low-code flows, validate graph rules, schedule recurring runs, and export Airflow-style DAGs.</td>
+    <td><strong>BI dashboard layer</strong><br/>Publish chart-driven dashboards, apply shared filters, and generate JSON or mock snapshot exports for stakeholder-ready reporting surfaces.</td>
   </tr>
 </table>
 
@@ -69,6 +84,7 @@ It is especially useful when you want to demonstrate:
 
 - Raw-to-curated data workflows
 - SQL-first transformation on local or object-backed files
+- Notebook-driven prototyping across multiple execution engines
 - Delta Lake publishing with metadata tracking
 - Airflow-like orchestration without leaving the app
 - In-app BI dashboards on top of curated outputs
@@ -81,6 +97,16 @@ It is especially useful when you want to demonstrate:
 - SQL querying over CSV, JSON, Parquet, and curated Delta tables
 - Write query outputs to Delta Lake with append or overwrite modes
 - Catalog browsing with metadata, freshness, ownership, tags, and lineage hints
+- Theme-aware workspace shell with dark and light presentation modes
+
+### Notebook Runtime
+
+- Multi-cell saved notebooks in the `Engine Lab`
+- Real local execution for DuckDB, PySpark, and DataFusion
+- Run-all, run-single-cell, and run-from-here execution flows
+- Notebook duplicate, delete, rename, and run history support
+- Source-aware asset browser with one-click SQL or Python snippet insertion
+- Persisted per-cell outputs so reopened notebooks restore the latest visible state
 
 ### Orchestration
 
@@ -148,6 +174,7 @@ Local endpoints:
 - App: `http://localhost:5173`
 - API: `http://localhost:8000`
 - API docs: `http://localhost:8000/docs`
+- Superset setup page: `http://localhost:5173/bi/superset`
 
 Demo credentials:
 
@@ -220,8 +247,9 @@ Suggested first demo:
 2. Query `raw_sales` in the SQL workspace
 3. Write `sales_curated` as a Delta table
 4. Open the catalog and inspect the curated asset
-5. Run the sample visual pipeline
-6. Build charts and review the published BI dashboard
+5. Open `Engine Lab` and run a DuckDB, Spark, or DataFusion notebook cell
+6. Run the sample visual pipeline
+7. Build charts and review the published BI dashboard
 
 ## Sample SQL
 
@@ -271,13 +299,15 @@ This repo has been locally verified with:
 
 - `python3 -m compileall backend/app backend/alembic`
 - `npm run build`
-- backend smoke checks for file upload, SQL execution, Delta writes, pipelines, BI flows, and report scheduling
+- backend smoke checks for file upload, SQL execution, Delta writes, notebook runtime flows, pipelines, BI flows, and report scheduling
 
 ## Current MVP Notes
 
-- DuckDB is the current primary query engine
+- DuckDB remains the primary SQL workspace engine
+- Spark and DataFusion are available through the notebook runtime surface
 - Delta publishing is implemented through the backend write services
 - Scheduling is now active in-app for saved cron pipelines
+- Notebook outputs persist per cell and restore when a notebook is reopened
 - The BI layer is intentionally lightweight and app-native; Superset remains the richer external optional path
 
 ## Roadmap
@@ -285,11 +315,11 @@ This repo has been locally verified with:
 ### Platform
 
 - Authentication and RBAC hardening
-- Spark execution engine
 - Flink streaming support
 - Great Expectations quality checks
 - OpenLineage integration
 - Hive Metastore or Nessie-backed catalog options
+- Notebook export artifacts and richer collaboration flows
 - CI/CD, monitoring, and Kubernetes deployment
 
 ### BI and Analytics
