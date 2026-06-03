@@ -214,14 +214,14 @@ export function CatalogPage() {
                         }
                       >
                         <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="font-semibold text-ink">{table.name}</p>
+                          <div className="min-w-0 flex-1">
+                            <p className="break-words font-semibold text-ink">{table.name}</p>
                             <p className={`mt-1 text-sm ${selectedTableId === table.id && theme === 'dark' ? 'text-white/78' : 'text-slate/70'}`}>
                               {table.description || 'No catalog description yet.'}
                             </p>
                           </div>
                           <span
-                            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
+                            className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
                               theme === 'dark'
                                 ? selectedTableId === table.id
                                   ? 'bg-black/25 text-[#fff7a8]'
@@ -283,10 +283,10 @@ export function CatalogPage() {
             {selectedTable && previewQuery.data ? (
               <>
                 <Panel className="space-y-5">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0 flex-1">
                       <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Selected Table</p>
-                      <h2 className="mt-2 font-display text-3xl text-ink">
+                      <h2 className="mt-2 break-words font-display text-3xl text-ink">
                         {selectedTable.schema_name}.{selectedTable.name}
                       </h2>
                       <p className="mt-3 max-w-3xl text-sm leading-6 text-slate/70">
@@ -303,7 +303,7 @@ export function CatalogPage() {
                         ))}
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex shrink-0 flex-wrap gap-2">
                       {canEdit ? (
                         <Button tone="ghost" disabled={refreshMutation.isPending} onClick={() => refreshMutation.mutate(selectedTable.id)}>
                           {refreshMutation.isPending ? 'Refreshing...' : 'Refresh Metadata'}

@@ -190,11 +190,11 @@ export function DatasetsPage() {
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-ink">{candidate.name}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="break-words font-semibold text-ink">{candidate.name}</p>
                       <p className="mt-1 text-sm text-slate/70">{candidate.schema_name || 'analytics'} • {candidate.row_count ?? 0} rows</p>
                     </div>
-                    <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate/60">Delta</span>
+                    <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate/60">Delta</span>
                   </div>
                   <p className="mt-3 line-clamp-2 text-sm text-slate/65">{candidate.description || 'Curated Delta table available for semantic registration.'}</p>
                 </button>
@@ -221,7 +221,7 @@ export function DatasetsPage() {
                     selection?.kind === 'dataset' && selection.id === dataset.id ? 'border-lagoon bg-cyan-50/70 shadow-sm' : 'border-slate-100 bg-slate-50/80'
                   }`}
                 >
-                  <p className="font-semibold text-ink">{dataset.name}</p>
+                  <p className="break-words font-semibold text-ink">{dataset.name}</p>
                   <p className="mt-2 text-sm text-slate/70">{dataset.source_type} • {dataset.source_ref}</p>
                   <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate/60">
                     <span>{dataset.schema_json?.length ?? 0} columns</span>
@@ -242,25 +242,25 @@ export function DatasetsPage() {
           {selectedCandidate || selectedDataset ? (
             <>
               <Panel className="space-y-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">
                       {selectedCandidate ? 'Candidate Dataset' : 'Semantic Dataset'}
                     </p>
-                    <h2 className="mt-2 font-display text-3xl text-ink">{selectedCandidate?.name || selectedDataset?.name}</h2>
+                    <h2 className="mt-2 break-words font-display text-3xl text-ink">{selectedCandidate?.name || selectedDataset?.name}</h2>
                     <p className="mt-3 text-sm leading-6 text-slate/70">
                       {selectedCandidate?.description || selectedDataset?.description || 'Inspect schema and model reusable semantic metadata for downstream charts and dashboards.'}
                     </p>
                   </div>
-                  <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-lagoon">
+                  <span className="shrink-0 self-start whitespace-nowrap rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-lagoon">
                     {selectedCandidate ? 'Ready to register' : 'Registered'}
                   </span>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="rounded-2xl bg-slate-50 p-4">
+                <div className="grid gap-4 md:grid-cols-[minmax(0,1.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]">
+                  <div className="min-w-0 rounded-2xl bg-slate-50 p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Source</p>
-                    <p className="mt-2 text-sm font-semibold text-ink">{selectedCandidate?.source_ref || selectedDataset?.source_ref}</p>
+                    <p className="mt-2 break-all text-sm font-semibold text-ink">{selectedCandidate?.source_ref || selectedDataset?.source_ref}</p>
                   </div>
                   <div className="rounded-2xl bg-slate-50 p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Columns</p>
