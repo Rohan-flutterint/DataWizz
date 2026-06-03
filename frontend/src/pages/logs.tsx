@@ -3,9 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 import { StatusBadge } from '../components/status-badge'
 import { Button, EmptyState, Input, PageHeader, Panel, Select } from '../components/ui'
 import { api } from '../lib/api'
+import { useTheme } from '../theme/theme-context'
 import { formatDate } from '../lib/utils'
 
 export function JobLogsPage() {
+  const { theme } = useTheme()
   const [runIdFilter, setRunIdFilter] = useState('')
   const [nodeIdFilter, setNodeIdFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -109,7 +111,15 @@ export function JobLogsPage() {
         <div className="rounded-2xl bg-cyan-50 p-4 text-sm text-lagoon">
           <p className="font-semibold">Filter Status</p>
           <p className="mt-2 leading-6">{statusMessage}</p>
-          <Button className="mt-4" tone="ghost" onClick={resetFilters}>
+          <Button
+            className="mt-4"
+            onClick={resetFilters}
+            style={
+              theme === 'dark'
+                ? { backgroundColor: '#0f172a', color: '#ffffff' }
+                : undefined
+            }
+          >
             Reset Filters
           </Button>
         </div>

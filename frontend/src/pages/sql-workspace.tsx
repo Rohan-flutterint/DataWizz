@@ -133,7 +133,22 @@ export function SqlWorkspacePage() {
       ) : null}
 
       {activeEngineId !== 'duckdb' ? (
-        <Panel className="border-cyan-200 bg-cyan-50 text-cyan-900 dark:border-cyan-500/20 dark:bg-cyan-500/10 dark:text-cyan-100">
+        <Panel
+          className="text-sm"
+          style={
+            theme === 'dark'
+              ? {
+                  borderColor: 'rgba(34, 211, 238, 0.18)',
+                  backgroundColor: 'rgba(6, 182, 212, 0.08)',
+                  color: '#cffafe',
+                }
+              : {
+                  borderColor: '#bae6fd',
+                  backgroundColor: '#ecfeff',
+                  color: '#155e75',
+                }
+          }
+        >
           <p className="font-semibold">Notebook engine selected: {activeEngineId}</p>
           <p className="mt-2 text-sm leading-6">
             The SQL Workspace remains DuckDB-backed for SQL execution and Delta publishing. Use the new Engine Lab tab for Spark or DataFusion notebook-style runtime selection.
