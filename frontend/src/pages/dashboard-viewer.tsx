@@ -7,6 +7,7 @@ import 'react-resizable/css/styles.css'
 import { ChartRenderer } from '../components/chart-renderer'
 import { Button, EmptyState, Input, PageHeader, Panel, Select } from '../components/ui'
 import { api } from '../lib/api'
+import { getChartSnapshot } from '../lib/chart-handoff'
 import { formatDate } from '../lib/utils'
 
 type DashboardFilterDefinition = {
@@ -161,11 +162,12 @@ export function DashboardViewerPage() {
     queries:
       detailQuery.data?.widgets.map((widget) => {
         const chart = widget.chart_id ? chartLookups.get(widget.chart_id) : undefined
+        const chartSnapshot = getChartSnapshot((chart?.config_json ?? {}) as Record<string, unknown>)
         const filteredSql = chart?.query_sql ? applyFiltersToSql(chart.query_sql, dashboardFilters, filterValues, widget.chart_id ?? undefined) : 'SELECT 1 AS value'
         return {
           queryKey: ['bi', 'charts', widget.id, 'preview', filteredSql],
           queryFn: () => api.previewChart({ sql: filteredSql, limit: 100 }),
-          enabled: widget.widget_type === 'chart' && Boolean(chart?.query_sql),
+          enabled: widget.widget_type === 'chart' && Boolean(chart?.query_sql) && !chartSnapshot,
         }
       }) ?? [],
   })
@@ -342,6 +344,7 @@ export function DashboardViewerPage() {
                     const chart = widget.chart_id ? chartLookups.get(widget.chart_id) : undefined
                     const preview = widgetChartQueries[index]?.data
                     const chartConfig = (chart?.config_json ?? {}) as Record<string, unknown>
+                    const chartSnapshot = getChartSnapshot(chartConfig)
 
                     return (
                       <div key={widget.layout_json.i ?? widget.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -349,10 +352,14 @@ export function DashboardViewerPage() {
                           <div className="h-full p-4">
                             <ChartRenderer
                               chartType={chart?.chart_type ?? 'bar'}
-                              rows={preview?.rows ?? []}
+                              rows={chartSnapshot?.rows ?? preview?.rows ?? []}
                               title={widget.title}
-                              categoryKey={chart?.chart_type === 'kpi' ? undefined : String(preview?.columns?.[0] ?? '')}
-                              valueKey={String(chartConfig.metricAlias ?? preview?.columns?.[1] ?? '')}
+                              categoryKey={
+                                chart?.chart_type === 'kpi'
+                                  ? undefined
+                                  : String(chartConfig.dimensionKey ?? chartSnapshot?.columns?.[0] ?? preview?.columns?.[0] ?? '')
+                              }
+                              valueKey={String(chartConfig.metricAlias ?? chartSnapshot?.columns?.[1] ?? preview?.columns?.[1] ?? '')}
                               config={chartConfig}
                             />
                           </div>
