@@ -3,8 +3,10 @@ import { PageHeader, Panel, StatCard } from '../components/ui'
 import { api } from '../lib/api'
 import { formatBytes, formatDate } from '../lib/utils'
 import { StatusBadge } from '../components/status-badge'
+import { useTheme } from '../theme/theme-context'
 
 export function DashboardPage() {
+  const { theme } = useTheme()
   const { data } = useQuery({ queryKey: ['dashboard-metrics'], queryFn: api.getDashboardMetrics })
 
   return (
@@ -25,10 +27,14 @@ export function DashboardPage() {
 
       <section className="grid gap-5 xl:grid-cols-[1.45fr_1fr]">
         <Panel className="overflow-hidden p-0">
-          <div className="border-b border-slate-200 bg-slate-950 px-6 py-5 text-white">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/55">Workspace Summary</p>
+          <div
+            className={`border-b px-6 py-5 ${
+              theme === 'dark' ? 'border-white/10 bg-slate-950 text-white' : 'border-slate-200 bg-white text-slate-950'
+            }`}
+          >
+            <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${theme === 'dark' ? 'text-white/55' : 'text-slate-500'}`}>Workspace Summary</p>
             <h2 className="mt-2 font-display text-3xl">Build, run, and analyze data products in DataWizz</h2>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-white/72">
+            <p className={`mt-3 max-w-3xl text-sm leading-7 ${theme === 'dark' ? 'text-white/72' : 'text-slate-700'}`}>
               This MVP already supports raw ingestion, SQL exploration, Delta publishing, drag-and-drop pipelines, and an in-app analytics layer. The remaining work is now about hardening, governance, and richer product polish.
             </p>
           </div>

@@ -221,6 +221,14 @@ export function AppShell() {
                         'app-search-panel absolute inset-x-0 top-[calc(100%+10px)] z-30 rounded-2xl p-3 shadow-2xl',
                         theme === 'dark' ? 'border border-white/10 bg-[#121212] text-white' : 'border border-slate-200 bg-white text-slate-900',
                       )}
+                      style={
+                        theme === 'dark'
+                          ? undefined
+                          : {
+                              backgroundColor: '#ffffff',
+                              color: '#0f172a',
+                            }
+                      }
                     >
                       {searchQuery.isLoading ? (
                         <p className={cn('px-3 py-3 text-sm', theme === 'dark' ? 'text-white/60' : 'text-slate-600')}>Searching the workspace...</p>
@@ -236,32 +244,50 @@ export function AppShell() {
                           </div>
                           <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
                             {searchResults.map((result) => (
-                            <button
-                              key={`${result.kind}-${result.id}`}
-                              type="button"
-                              onClick={() => navigateToResult(result.route)}
-                              className={cn(
-                                'flex w-full items-start gap-3 rounded-2xl border px-3 py-3 text-left transition',
-                                theme === 'dark'
-                                  ? 'border-transparent bg-white/[0.03] text-white hover:border-white/10 hover:bg-white/[0.06]'
-                                  : 'border-transparent bg-white text-slate-900 hover:border-slate-200 hover:bg-slate-50',
-                              )}
-                            >
-                              <span className={`mt-0.5 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${kindTone(result.kind)}`}>
-                                {result.kind}
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <p className={cn('truncate text-sm font-semibold', theme === 'dark' ? 'text-white' : 'text-slate-900')}>
-                                  {result.title || 'Untitled asset'}
-                                </p>
-                                <p className={cn('mt-1 line-clamp-2 text-sm leading-5', theme === 'dark' ? 'text-white/65' : 'text-slate-600')}>
-                                  {result.subtitle || result.route}
-                                </p>
-                              </div>
-                              <span className={cn('shrink-0 pl-2 text-xs uppercase tracking-[0.18em]', theme === 'dark' ? 'text-white/38' : 'text-slate-400')}>
-                                {formatDate(result.updated_at)}
-                              </span>
-                            </button>
+                              <button
+                                key={`${result.kind}-${result.id}`}
+                                type="button"
+                                onClick={() => navigateToResult(result.route)}
+                                className={cn(
+                                  'flex w-full items-start gap-3 rounded-2xl border px-3 py-3 text-left transition',
+                                  theme === 'dark'
+                                    ? 'border-transparent bg-white/[0.03] text-white hover:border-white/10 hover:bg-white/[0.06]'
+                                    : 'border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300 hover:bg-white',
+                                )}
+                                style={
+                                  theme === 'dark'
+                                    ? undefined
+                                    : {
+                                        backgroundColor: '#f8fafc',
+                                        borderColor: '#e2e8f0',
+                                        color: '#0f172a',
+                                      }
+                                }
+                              >
+                                <span className={`mt-0.5 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${kindTone(result.kind)}`}>
+                                  {result.kind}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <p
+                                    className={cn('truncate text-sm font-semibold', theme === 'dark' ? 'text-white' : 'text-slate-900')}
+                                    style={theme === 'dark' ? undefined : { color: '#0f172a' }}
+                                  >
+                                    {result.title || 'Untitled asset'}
+                                  </p>
+                                  <p
+                                    className={cn('mt-1 line-clamp-2 text-sm leading-5', theme === 'dark' ? 'text-white/65' : 'text-slate-600')}
+                                    style={theme === 'dark' ? undefined : { color: '#475569' }}
+                                  >
+                                    {result.subtitle || result.route}
+                                  </p>
+                                </div>
+                                <span
+                                  className={cn('shrink-0 pl-2 text-xs uppercase tracking-[0.18em]', theme === 'dark' ? 'text-white/38' : 'text-slate-400')}
+                                  style={theme === 'dark' ? undefined : { color: '#64748b' }}
+                                >
+                                  {formatDate(result.updated_at)}
+                                </span>
+                              </button>
                             ))}
                           </div>
                         </div>
