@@ -67,6 +67,17 @@ function buildWriteDeltaHelperSnippet(engineId: string) {
   return `write_info = write_delta(\n    result=result,\n    table_name="curated_notebook_output",\n    mode="overwrite",\n)\nprint(write_info["table"]["name"])`
 }
 
+function toArtifactName(...parts: Array<string | null | undefined>) {
+  const value = parts
+    .filter(Boolean)
+    .join('_')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+  return value || 'notebook_output'
+}
+
 function buildDefaultNotebook(engine: ExecutionEngine | null): NotebookDocument | null {
   if (!engine) return null
   return {
@@ -170,6 +181,10 @@ export function EngineLabPage() {
   })
   const deleteNotebookMutation = useMutation({
     mutationFn: api.deleteNotebook,
+  })
+  const writeNotebookCellDeltaMutation = useMutation({
+    mutationFn: ({ notebookId, cellId, payload }: { notebookId: string; cellId: string; payload: { table_name: string; mode: 'overwrite' | 'append'; schema_name: string; description?: string } }) =>
+      api.writeNotebookCellDelta(notebookId, cellId, payload),
   })
 
   const activeNotebook = draftNotebook
@@ -323,6 +338,56 @@ export function EngineLabPage() {
       setRunFeedback(`Notebook run completed successfully in ${result.run.duration_ms ?? 0} ms`)
       await queryClient.invalidateQueries({ queryKey: ['notebook-detail', saved.id] })
       await queryClient.invalidateQueries({ queryKey: ['notebooks'] })
+    } catch (error) {
+      setRunError((error as Error).message)
+    }
+  }
+
+  const downloadNotebookCellArtifact = async (cell: NotebookCell, format: 'csv' | 'parquet') => {
+    if (!selectedNotebookId || !activeNotebook) {
+      setRunError('Save this notebook before exporting a cell result.')
+      return
+    }
+    setRunError(null)
+    setRunFeedback(null)
+    try {
+      const fileName = toArtifactName(activeNotebook.name, cell.title || cell.id)
+      const blob = await api.exportNotebookCell(selectedNotebookId, cell.id, { format, file_name: fileName })
+      const url = window.URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `${fileName}.${format}`
+      anchor.click()
+      window.URL.revokeObjectURL(url)
+      setRunFeedback(`${format.toUpperCase()} export started for ${cell.title || cell.id}`)
+    } catch (error) {
+      setRunError((error as Error).message)
+    }
+  }
+
+  const publishNotebookCellToDelta = async (cell: NotebookCell) => {
+    if (!selectedNotebookId || !activeNotebook) {
+      setRunError('Save this notebook before publishing a cell result to Delta.')
+      return
+    }
+    const suggestedName = toArtifactName(activeNotebook.name, cell.title || cell.id)
+    const tableName = window.prompt('Delta table name', suggestedName)
+    if (!tableName) return
+    setRunError(null)
+    setRunFeedback(null)
+    try {
+      const response = await writeNotebookCellDeltaMutation.mutateAsync({
+        notebookId: selectedNotebookId,
+        cellId: cell.id,
+        payload: {
+          table_name: tableName,
+          mode: 'overwrite',
+          schema_name: 'analytics',
+          description: `Published from notebook ${activeNotebook.name}${cell.title ? ` · ${cell.title}` : ''}`,
+        },
+      })
+      await queryClient.invalidateQueries({ queryKey: ['tables'] })
+      setRunFeedback(`Notebook result published to Delta as ${response.table.schema_name}.${response.table.name}`)
     } catch (error) {
       setRunError((error as Error).message)
     }
@@ -935,6 +1000,33 @@ export function EngineLabPage() {
                         {result.message ? <p className="mt-2 max-w-3xl text-sm text-slate/75">{result.message}</p> : null}
                       </div>
                       <div className="flex flex-wrap gap-3">
+                        <Button
+                          tone="ghost"
+                          onClick={() => {
+                            void downloadNotebookCellArtifact(cell, 'csv')
+                          }}
+                          disabled={!selectedNotebookId || !result.columns.length}
+                        >
+                          Export CSV
+                        </Button>
+                        <Button
+                          tone="ghost"
+                          onClick={() => {
+                            void downloadNotebookCellArtifact(cell, 'parquet')
+                          }}
+                          disabled={!selectedNotebookId || !result.columns.length}
+                        >
+                          Export Parquet
+                        </Button>
+                        <Button
+                          tone="ghost"
+                          onClick={() => {
+                            void publishNotebookCellToDelta(cell)
+                          }}
+                          disabled={!selectedNotebookId || !result.columns.length || writeNotebookCellDeltaMutation.isPending}
+                        >
+                          {writeNotebookCellDeltaMutation.isPending ? 'Publishing...' : 'Publish to Delta'}
+                        </Button>
                         <Button
                           tone="ghost"
                           onClick={() => handoffCellResultToChartBuilder(cell, result)}

@@ -213,6 +213,82 @@ class ExecutionEngineService:
 
         return run, cell_results
 
+    def materialize_saved_notebook_cell(
+        self,
+        notebook: NotebookDocument,
+        *,
+        db: Session,
+        uploaded_files: list[UploadedFile],
+        delta_tables: list[DeltaTableModel],
+        cell_id: str,
+    ) -> dict[str, Any]:
+        engine = self.get_engine(notebook.engine_id)
+        if not engine["available"]:
+            raise ValueError(engine["availability_reason"] or f"{engine['label']} is not available in this environment.")
+
+        cells = notebook.cells_json or []
+        if not cells:
+            raise ValueError("This notebook has no cells to execute.")
+
+        matches = [index for index, cell in enumerate(cells) if cell.get("id") == cell_id]
+        if not matches:
+            raise ValueError(f"Notebook cell '{cell_id}' was not found.")
+        target_index = matches[0]
+        target_cell = cells[target_index]
+
+        context = self._build_source_context(uploaded_files, delta_tables)
+        runtime = self._build_runtime(
+            notebook.engine_id,
+            engine=engine,
+            uploaded_files=uploaded_files,
+            delta_tables=delta_tables,
+            db=db,
+            context=context,
+        )
+
+        for cell in cells[:target_index]:
+            if not cell.get("code"):
+                continue
+            self._execute_runtime_cell(runtime, cell["code"], db, 200)
+
+        if not target_cell.get("code"):
+            raise ValueError("This notebook cell is empty and cannot be exported.")
+
+        if runtime["type"] == "duckdb":
+            conn = self.duckdb_service.connect()
+            try:
+                for file_record in uploaded_files:
+                    self.duckdb_service.register_uploaded_file(conn, file_record)
+                for table_record in delta_tables:
+                    self.duckdb_service.register_delta_table(conn, table_record)
+                effective_sql = target_cell["code"].strip().rstrip(";")
+                if not effective_sql:
+                    raise ValueError("This notebook cell is empty and cannot be exported.")
+                arrow_table = conn.execute(effective_sql).fetch_arrow_table()
+            finally:
+                conn.close()
+            return {
+                "engine": engine,
+                "cell": target_cell,
+                "arrow_table": arrow_table,
+                "row_count": arrow_table.num_rows,
+                "columns": arrow_table.column_names,
+            }
+
+        materialized = self._execute_python_notebook_materialized(engine, target_cell["code"], runtime["namespace"])
+        if materialized["result"] is None:
+            raise ValueError("This notebook cell did not produce an exportable result. Assign a dataframe-like object to `result` first.")
+        arrow_table = self._to_arrow_table(materialized["result"])
+        return {
+            "engine": engine,
+            "cell": target_cell,
+            "arrow_table": arrow_table,
+            "row_count": arrow_table.num_rows,
+            "columns": arrow_table.column_names,
+            "stdout": materialized["stdout"],
+            "execution_ms": materialized["execution_ms"],
+        }
+
     def _merge_notebook_cell_results(
         self,
         existing_results: list[dict[str, Any]],
@@ -550,6 +626,23 @@ class ExecutionEngineService:
                 "warnings": warnings,
                 "metadata": context,
             },
+        }
+
+    def _execute_python_notebook_materialized(
+        self,
+        engine: dict[str, Any],
+        code: str,
+        namespace: dict[str, Any],
+    ) -> dict[str, Any]:
+        stdout_buffer = StringIO()
+        started = perf_counter()
+        with redirect_stdout(stdout_buffer):
+            exec(compile(code, f"{engine['id']}_notebook.py", "exec"), namespace, namespace)
+        execution_ms = int((perf_counter() - started) * 1000)
+        return {
+            "result": namespace.get("result"),
+            "stdout": stdout_buffer.getvalue().strip() or None,
+            "execution_ms": execution_ms,
         }
 
     def _build_write_delta_helper(self, db: Session | None, namespace: dict[str, Any], *, engine_id: str):
