@@ -29,3 +29,19 @@ class NotebookRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     run_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class NotebookArtifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "notebook_artifacts"
+
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    notebook_run_id: Mapped[str | None] = mapped_column(ForeignKey("notebook_runs.id", ondelete="SET NULL"), nullable=True)
+    delta_table_id: Mapped[str | None] = mapped_column(ForeignKey("delta_tables.id", ondelete="SET NULL"), nullable=True)
+    cell_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    cell_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    artifact_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    download_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
