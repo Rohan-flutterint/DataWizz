@@ -1,4 +1,3 @@
-from uuid import uuid4
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -6,23 +5,26 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import get_bearer_token, get_current_user, require_roles
 from app.core.config import get_settings
 from app.db.session import get_db
+from app.models.auth import User
 from app.models.bi import Chart, Dashboard
 from app.models.catalog import DeltaTable, UploadedFile
 from app.models.pipeline import JobLog, PipelineRun
 from app.models.pipeline import Pipeline
 from app.schemas.system import (
+    AuthSessionResponse,
+    AuthUserResponse,
     DashboardMetricsResponse,
-    DemoLoginRequest,
-    DemoLoginResponse,
-    DemoUserResponse,
     GlobalSearchResponse,
     GlobalSearchResult,
+    LoginRequest,
     RecentActivityItem,
     SettingsSnapshotResponse,
     SupersetHealthResponse,
 )
+from app.services.auth_service import auth_service
 from app.services.storage import StorageService
 
 
@@ -32,7 +34,7 @@ storage_service = StorageService()
 
 
 @router.get("/dashboard-metrics", response_model=DashboardMetricsResponse)
-def dashboard_metrics(db: Session = Depends(get_db)) -> DashboardMetricsResponse:
+def dashboard_metrics(db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> DashboardMetricsResponse:
     recent_activity: list[RecentActivityItem] = []
     recent_files = db.query(UploadedFile).order_by(desc(UploadedFile.created_at)).limit(3).all()
     recent_runs = db.query(PipelineRun).order_by(desc(PipelineRun.created_at)).limit(3).all()
@@ -58,7 +60,7 @@ def dashboard_metrics(db: Session = Depends(get_db)) -> DashboardMetricsResponse
 
 
 @router.get("/settings", response_model=SettingsSnapshotResponse)
-def settings_snapshot() -> SettingsSnapshotResponse:
+def settings_snapshot(_: User = Depends(require_roles("admin"))) -> SettingsSnapshotResponse:
     return SettingsSnapshotResponse(
         storage={
             "raw": settings.raw_storage_path,
@@ -71,19 +73,28 @@ def settings_snapshot() -> SettingsSnapshotResponse:
     )
 
 
-@router.post("/demo-login", response_model=DemoLoginResponse)
-def demo_login(payload: DemoLoginRequest) -> DemoLoginResponse:
-    if payload.email.strip().lower() != settings.demo_admin_email.lower() or payload.password != settings.demo_admin_password:
-        raise HTTPException(status_code=401, detail="Invalid demo credentials")
-
-    return DemoLoginResponse(
-        token=str(uuid4()),
-        user=DemoUserResponse(
-            name=settings.demo_admin_name,
-            email=settings.demo_admin_email,
-            role="admin",
-        ),
+@router.post("/login", response_model=AuthSessionResponse)
+@router.post("/demo-login", response_model=AuthSessionResponse)
+def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthSessionResponse:
+    user = auth_service.authenticate_user(db, payload.email, payload.password)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    _, token = auth_service.create_session(db, user)
+    return AuthSessionResponse(
+        token=token,
+        user=AuthUserResponse(name=user.name, email=user.email, role=user.role),
     )
+
+
+@router.get("/me", response_model=AuthUserResponse)
+def current_session_me(current_user: User = Depends(get_current_user)) -> AuthUserResponse:
+    return AuthUserResponse(name=current_user.name, email=current_user.email, role=current_user.role)
+
+
+@router.post("/logout")
+def logout(token: str = Depends(get_bearer_token), db: Session = Depends(get_db)) -> dict[str, str]:
+    auth_service.revoke_session(db, token)
+    return {"message": "Logged out successfully"}
 
 
 @router.get("/search", response_model=GlobalSearchResponse)
@@ -91,6 +102,7 @@ def global_search(
     db: Session = Depends(get_db),
     q: str = Query(min_length=1),
     limit: int = Query(default=12, ge=1, le=30),
+    _: User = Depends(get_current_user),
 ) -> GlobalSearchResponse:
     needle = q.strip()
     if not needle:
@@ -209,7 +221,7 @@ def global_search(
 
 
 @router.get("/integrations/superset", response_model=SupersetHealthResponse)
-def superset_integration_status() -> SupersetHealthResponse:
+def superset_integration_status(_: User = Depends(get_current_user)) -> SupersetHealthResponse:
     checked_url = f"{settings.superset_url.rstrip('/')}/health"
     reachable = False
     http_status: int | None = None

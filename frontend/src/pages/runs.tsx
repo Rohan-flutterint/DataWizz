@@ -1,11 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
+import { useAuth } from '../auth/auth-context'
 import { StatusBadge } from '../components/status-badge'
 import { Button, EmptyState, PageHeader, Panel } from '../components/ui'
 import { api } from '../lib/api'
 import { formatDate } from '../lib/utils'
 
 export function PipelineRunsPage() {
+  const { hasAnyRole } = useAuth()
+  const canRetry = hasAnyRole('admin', 'analyst')
   const queryClient = useQueryClient()
   const runsQuery = useQuery({ queryKey: ['runs'], queryFn: api.listRuns })
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
@@ -117,13 +120,15 @@ export function PipelineRunsPage() {
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusBadge status={detailQuery.data.run.status} />
-                      <Button
-                        tone="ghost"
-                        disabled={retryMutation.isPending}
-                        onClick={() => retryMutation.mutate(detailQuery.data!.run.id)}
-                      >
-                        {retryMutation.isPending ? 'Retrying...' : 'Retry Run'}
-                      </Button>
+                      {canRetry ? (
+                        <Button
+                          tone="ghost"
+                          disabled={retryMutation.isPending}
+                          onClick={() => retryMutation.mutate(detailQuery.data!.run.id)}
+                        >
+                          {retryMutation.isPending ? 'Retrying...' : 'Retry Run'}
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
 

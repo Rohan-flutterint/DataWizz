@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import require_roles
 from app.db.session import get_db
 from app.models.catalog import DeltaTable
 from app.schemas.tables import DeltaTableListResponse, DeltaTableMetadataUpdateRequest, DeltaTablePreviewResponse, DeltaTableRead
@@ -31,7 +32,7 @@ def preview_table(table_id: str, db: Session = Depends(get_db)) -> DeltaTablePre
     return DeltaTablePreviewResponse(table=enriched, columns=preview["columns"], rows=preview["rows"])
 
 
-@router.put("/{table_id}/metadata", response_model=DeltaTableRead)
+@router.put("/{table_id}/metadata", response_model=DeltaTableRead, dependencies=[Depends(require_roles("admin", "analyst"))])
 def update_table_metadata(table_id: str, payload: DeltaTableMetadataUpdateRequest, db: Session = Depends(get_db)) -> DeltaTableRead:
     table = db.query(DeltaTable).filter(DeltaTable.id == table_id).one_or_none()
     if table is None:
@@ -40,7 +41,7 @@ def update_table_metadata(table_id: str, payload: DeltaTableMetadataUpdateReques
     return DeltaTableRead.model_validate(enriched)
 
 
-@router.post("/{table_id}/refresh", response_model=DeltaTableRead)
+@router.post("/{table_id}/refresh", response_model=DeltaTableRead, dependencies=[Depends(require_roles("admin", "analyst"))])
 def refresh_table_metadata(table_id: str, db: Session = Depends(get_db)) -> DeltaTableRead:
     table = db.query(DeltaTable).filter(DeltaTable.id == table_id).one_or_none()
     if table is None:

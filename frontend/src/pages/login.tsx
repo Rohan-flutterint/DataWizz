@@ -139,22 +139,34 @@ export function LoginPage() {
                   <div className="flex items-center justify-between gap-3">
                     <p className="font-semibold text-white">Access Status</p>
                   </div>
-                  <p className="mt-3 leading-6 text-white/74">Use the demo credentials below to enter the workspace.</p>
+                  <p className="mt-3 leading-6 text-white/74">Use one of the seeded workspace accounts below to enter the platform with the right role scope.</p>
                 </div>
 
                 <div className="mt-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
                   <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5 text-sm text-white/72">
-                    <p className="font-semibold text-white">Demo Credentials</p>
-                    <p className="mt-3 leading-6">
-                      Email
-                      <br />
-                      <span className="font-mono text-white">admin@datawizz.local</span>
-                    </p>
-                    <p className="mt-3 leading-6">
-                      Password
-                      <br />
-                      <span className="font-mono text-white">datawizz123</span>
-                    </p>
+                    <p className="font-semibold text-white">Workspace Accounts</p>
+                    <div className="mt-3 space-y-4 leading-6">
+                      <div>
+                        <span className="text-white/45">Admin</span>
+                        <br />
+                        <span className="font-mono text-white">admin@datawizz.local</span>
+                      </div>
+                      <div>
+                        <span className="text-white/45">Analyst</span>
+                        <br />
+                        <span className="font-mono text-white">analyst@datawizz.local</span>
+                      </div>
+                      <div>
+                        <span className="text-white/45">Viewer</span>
+                        <br />
+                        <span className="font-mono text-white">viewer@datawizz.local</span>
+                      </div>
+                      <div>
+                        <span className="text-white/45">Password</span>
+                        <br />
+                        <span className="font-mono text-white">datawizz123</span>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5 text-sm text-white/72">

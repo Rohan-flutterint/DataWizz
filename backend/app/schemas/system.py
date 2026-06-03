@@ -35,20 +35,20 @@ class SupersetHealthResponse(BaseModel):
     setup: dict
 
 
-class DemoLoginRequest(BaseModel):
+class LoginRequest(BaseModel):
     email: str
     password: str
 
 
-class DemoUserResponse(BaseModel):
+class AuthUserResponse(BaseModel):
     name: str
     email: str
     role: str
 
 
-class DemoLoginResponse(BaseModel):
+class AuthSessionResponse(BaseModel):
     token: str
-    user: DemoUserResponse
+    user: AuthUserResponse
 
 
 class GlobalSearchResult(BaseModel):

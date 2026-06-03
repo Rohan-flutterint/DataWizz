@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import require_roles
 from app.db.session import get_db
 from app.models.catalog import DeltaTable, QueryHistory, UploadedFile
 from app.schemas.queries import (
@@ -41,7 +42,7 @@ def list_query_history(db: Session = Depends(get_db)) -> QueryHistoryListRespons
     return QueryHistoryListResponse(items=items)
 
 
-@router.post("/execute", response_model=QueryExecuteResponse)
+@router.post("/execute", response_model=QueryExecuteResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def execute_query(payload: QueryExecuteRequest, db: Session = Depends(get_db)) -> QueryExecuteResponse:
     try:
         result = _run_query_for_payload(db, payload.sql, payload.limit)
@@ -69,7 +70,7 @@ def execute_query(payload: QueryExecuteRequest, db: Session = Depends(get_db)) -
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/export")
+@router.post("/export", dependencies=[Depends(require_roles("admin", "analyst"))])
 def export_query(payload: QueryExportRequest, db: Session = Depends(get_db)) -> StreamingResponse:
     try:
         result = _run_query_for_payload(db, payload.sql, None)
@@ -98,7 +99,7 @@ def export_query(payload: QueryExportRequest, db: Session = Depends(get_db)) -> 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/write-delta", response_model=WriteDeltaResponse)
+@router.post("/write-delta", response_model=WriteDeltaResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def write_delta(payload: WriteDeltaRequest, db: Session = Depends(get_db)) -> WriteDeltaResponse:
     result = _run_query_for_payload(db, payload.sql, None)
     table = delta_service.write_table(

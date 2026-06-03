@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useAuth } from '../auth/auth-context'
 import { DataTable } from '../components/data-table'
 import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, StatCard, Textarea } from '../components/ui'
 import { api } from '../lib/api'
@@ -15,6 +16,8 @@ function freshnessTone(status?: string) {
 }
 
 export function CatalogPage() {
+  const { hasAnyRole } = useAuth()
+  const canEdit = hasAnyRole('admin', 'analyst')
   const { theme } = useTheme()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -147,6 +150,8 @@ export function CatalogPage() {
         <p className="font-semibold">Catalog Status</p>
         <p className="mt-2 leading-6">{statusMessage}</p>
       </Panel>
+
+      {!canEdit ? <Panel className="border-slate-200 bg-slate-50 text-sm text-slate-700">Your current role is read-only. You can browse curated assets and preview data here, but governance edits and metadata refreshes are limited to analysts and admins.</Panel> : null}
 
       {!tables.length ? (
         <EmptyState
@@ -299,9 +304,11 @@ export function CatalogPage() {
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Button tone="ghost" disabled={refreshMutation.isPending} onClick={() => refreshMutation.mutate(selectedTable.id)}>
-                        {refreshMutation.isPending ? 'Refreshing...' : 'Refresh Metadata'}
-                      </Button>
+                      {canEdit ? (
+                        <Button tone="ghost" disabled={refreshMutation.isPending} onClick={() => refreshMutation.mutate(selectedTable.id)}>
+                          {refreshMutation.isPending ? 'Refreshing...' : 'Refresh Metadata'}
+                        </Button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => navigate(`/sql?table=${encodeURIComponent(selectedTable.name)}`)}
@@ -370,24 +377,26 @@ export function CatalogPage() {
                           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Catalog Governance</p>
                           <h3 className="mt-2 font-display text-2xl text-ink">Ownership, Tags, and Lineage</h3>
                         </div>
-                        <Button
-                          disabled={updateMetadataMutation.isPending}
-                          onClick={() =>
-                            updateMetadataMutation.mutate({
-                              tableId: selectedTable.id,
-                              owner: ownerDraft,
-                              tags: tagsDraft
-                                .split(',')
-                                .map((tag) => tag.trim())
-                                .filter(Boolean),
-                              lineage_hint: lineageDraft,
-                            })
-                          }
-                        >
-                          {updateMetadataMutation.isPending ? 'Saving...' : 'Save Metadata'}
-                        </Button>
+                        {canEdit ? (
+                          <Button
+                            disabled={updateMetadataMutation.isPending}
+                            onClick={() =>
+                              updateMetadataMutation.mutate({
+                                tableId: selectedTable.id,
+                                owner: ownerDraft,
+                                tags: tagsDraft
+                                  .split(',')
+                                  .map((tag) => tag.trim())
+                                  .filter(Boolean),
+                                lineage_hint: lineageDraft,
+                              })
+                            }
+                          >
+                            {updateMetadataMutation.isPending ? 'Saving...' : 'Save Metadata'}
+                          </Button>
+                        ) : null}
                       </div>
-                      <div className="grid gap-4">
+                      <fieldset className="grid gap-4" disabled={!canEdit}>
                         <div>
                           <Label>Owner</Label>
                           <Input value={ownerDraft} onChange={(event) => setOwnerDraft(event.target.value)} placeholder="analytics_engineering" />
@@ -400,7 +409,7 @@ export function CatalogPage() {
                           <Label>Lineage Hint</Label>
                           <Textarea rows={4} value={lineageDraft} onChange={(event) => setLineageDraft(event.target.value)} />
                         </div>
-                      </div>
+                      </fieldset>
                     </Panel>
                     <Panel className="flex items-center justify-between gap-3">
                       <div>

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useAuth } from '../auth/auth-context'
 import { ChartRenderer } from '../components/chart-renderer'
 import { DataTable } from '../components/data-table'
 import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
@@ -9,6 +10,8 @@ import { getChartSnapshot } from '../lib/chart-handoff'
 import { formatDate } from '../lib/utils'
 
 export function SavedChartsPage() {
+  const { hasAnyRole } = useAuth()
+  const canEdit = hasAnyRole('admin', 'analyst')
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
@@ -146,6 +149,12 @@ export function SavedChartsPage() {
         description="Search, inspect, preview, and manage saved chart definitions before wiring them into dashboards or scheduled reports."
       />
 
+      {!canEdit ? (
+        <Panel className="border-slate-200 bg-slate-50 text-sm text-slate-700">
+          Your current role is read-only. You can inspect saved charts, previews, and downstream dashboard lineage here, but chart edits are limited to analysts and admins.
+        </Panel>
+      ) : null}
+
       <Panel className="grid gap-4 xl:grid-cols-[1fr_0.85fr_1fr]">
         <div className="grid gap-4 md:grid-cols-[1fr_180px]">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search charts, types, or datasets" />
@@ -232,38 +241,42 @@ export function SavedChartsPage() {
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-lagoon">{selectedChart.chart_type}</span>
-                      <Button disabled={updateMutation.isPending} onClick={() => selectedChart && updateMutation.mutate({
-                        id: selectedChart.id,
-                        body: {
-                          name: editName,
-                          chart_type: editChartType,
-                          dataset_id: editDatasetId || undefined,
-                          query_sql: selectedSnapshot ? '-- Notebook snapshot chart from Engine Lab' : editSql,
-                          config_json: {
-                            ...selectedConfig,
-                            dimensionKey: editDimensionKey || null,
-                            metricAlias: editMetricAlias || null,
-                            rowLimit: editRowLimit ? Number(editRowLimit) : null,
-                            sortBy: editSortBy,
-                            sortDirection: editSortDirection,
-                            xAxisLabel: editXAxisLabel || null,
-                            yAxisLabel: editYAxisLabel || null,
-                            color: editColor,
-                            fillColor: editFillColor,
-                            numberFormat: editNumberFormat,
-                            showLegend: editLegendMode === 'show',
-                            kpiSubtitle: editKpiSubtitle || null,
-                            kpiThresholdValue: editKpiThresholdValue ? Number(editKpiThresholdValue) : null,
-                            kpiThresholdDirection: editKpiThresholdDirection,
-                            datasetName: editDatasetId ? datasetNameById.get(editDatasetId) : undefined,
-                          },
-                        },
-                      })}>
-                        {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
-                      </Button>
-                      <Button tone="danger" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(selectedChart.id)}>
-                        {deleteMutation.isPending ? 'Deleting...' : 'Delete Chart'}
-                      </Button>
+                      {canEdit ? (
+                        <>
+                          <Button disabled={updateMutation.isPending} onClick={() => selectedChart && updateMutation.mutate({
+                            id: selectedChart.id,
+                            body: {
+                              name: editName,
+                              chart_type: editChartType,
+                              dataset_id: editDatasetId || undefined,
+                              query_sql: selectedSnapshot ? '-- Notebook snapshot chart from Engine Lab' : editSql,
+                              config_json: {
+                                ...selectedConfig,
+                                dimensionKey: editDimensionKey || null,
+                                metricAlias: editMetricAlias || null,
+                                rowLimit: editRowLimit ? Number(editRowLimit) : null,
+                                sortBy: editSortBy,
+                                sortDirection: editSortDirection,
+                                xAxisLabel: editXAxisLabel || null,
+                                yAxisLabel: editYAxisLabel || null,
+                                color: editColor,
+                                fillColor: editFillColor,
+                                numberFormat: editNumberFormat,
+                                showLegend: editLegendMode === 'show',
+                                kpiSubtitle: editKpiSubtitle || null,
+                                kpiThresholdValue: editKpiThresholdValue ? Number(editKpiThresholdValue) : null,
+                                kpiThresholdDirection: editKpiThresholdDirection,
+                                datasetName: editDatasetId ? datasetNameById.get(editDatasetId) : undefined,
+                              },
+                            },
+                          })}>
+                            {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+                          </Button>
+                          <Button tone="danger" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(selectedChart.id)}>
+                            {deleteMutation.isPending ? 'Deleting...' : 'Delete Chart'}
+                          </Button>
+                        </>
+                      ) : null}
                     </div>
                   </div>
 
@@ -328,7 +341,7 @@ export function SavedChartsPage() {
                     ) : null}
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <fieldset className="grid gap-4 md:grid-cols-2" disabled={!canEdit}>
                     <div>
                       <Label>Chart Name</Label>
                       <Input value={editName} onChange={(event) => setEditName(event.target.value)} />
@@ -438,7 +451,7 @@ export function SavedChartsPage() {
                       <Label>Chart SQL</Label>
                       <Textarea rows={10} value={editSql} onChange={(event) => setEditSql(event.target.value)} />
                     </div>
-                  </div>
+                  </fieldset>
                 </Panel>
 
                 <div className="grid gap-5 xl:grid-cols-[0.95fr_minmax(0,1.05fr)]">

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import require_roles
 from app.db.session import get_db
 from app.models.catalog import DeltaTable, UploadedFile
 from app.models.pipeline import JobLog, Pipeline, PipelineRun
@@ -58,7 +59,7 @@ def _to_pipeline_run_read(run: PipelineRun, db: Session) -> PipelineRunRead:
     return payload
 
 
-@router.post("", response_model=PipelineRead)
+@router.post("", response_model=PipelineRead, dependencies=[Depends(require_roles("admin", "analyst"))])
 def create_pipeline(payload: PipelineCreateRequest, db: Session = Depends(get_db)) -> PipelineRead:
     record = Pipeline(
         name=_resolve_pipeline_name(db, payload.name),
@@ -85,7 +86,7 @@ def get_pipeline(pipeline_id: str, db: Session = Depends(get_db)) -> PipelineRea
     return record
 
 
-@router.put("/{pipeline_id}", response_model=PipelineRead)
+@router.put("/{pipeline_id}", response_model=PipelineRead, dependencies=[Depends(require_roles("admin", "analyst"))])
 def update_pipeline(pipeline_id: str, payload: PipelineUpdateRequest, db: Session = Depends(get_db)) -> PipelineRead:
     record = db.query(Pipeline).filter(Pipeline.id == pipeline_id).one_or_none()
     if record is None:
@@ -105,7 +106,7 @@ def update_pipeline(pipeline_id: str, payload: PipelineUpdateRequest, db: Sessio
     return record
 
 
-@router.post("/{pipeline_id}/validate", response_model=PipelineValidationResponse)
+@router.post("/{pipeline_id}/validate", response_model=PipelineValidationResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def validate_pipeline(pipeline_id: str, db: Session = Depends(get_db)) -> PipelineValidationResponse:
     record = db.query(Pipeline).filter(Pipeline.id == pipeline_id).one_or_none()
     if record is None:
@@ -121,7 +122,7 @@ def validate_pipeline(pipeline_id: str, db: Session = Depends(get_db)) -> Pipeli
     return PipelineValidationResponse(valid=valid, message=message, ordered_nodes=ordered_nodes, issues=issues)
 
 
-@router.post("/{pipeline_id}/run", response_model=PipelineRunResponse)
+@router.post("/{pipeline_id}/run", response_model=PipelineRunResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def run_pipeline(pipeline_id: str, db: Session = Depends(get_db)) -> PipelineRunResponse:
     record = db.query(Pipeline).filter(Pipeline.id == pipeline_id).one_or_none()
     if record is None:
@@ -131,7 +132,7 @@ def run_pipeline(pipeline_id: str, db: Session = Depends(get_db)) -> PipelineRun
     return PipelineRunResponse(run=_to_pipeline_run_read(run, db), logs=logs)
 
 
-@router.post("/runs/{run_id}/retry", response_model=PipelineRunResponse)
+@router.post("/runs/{run_id}/retry", response_model=PipelineRunResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def retry_run(run_id: str, db: Session = Depends(get_db)) -> PipelineRunResponse:
     previous_run = db.query(PipelineRun).filter(PipelineRun.id == run_id).one_or_none()
     if previous_run is None:
@@ -151,7 +152,7 @@ def get_scheduler_status() -> SchedulerStatusResponse:
     return SchedulerStatusResponse.model_validate(pipeline_scheduler_service.get_status())
 
 
-@router.post("/scheduler/run-due", response_model=SchedulerSweepResponse)
+@router.post("/scheduler/run-due", response_model=SchedulerSweepResponse, dependencies=[Depends(require_roles("admin"))])
 def run_due_schedules() -> SchedulerSweepResponse:
     return SchedulerSweepResponse.model_validate(pipeline_scheduler_service.run_due_pipelines_once())
 
