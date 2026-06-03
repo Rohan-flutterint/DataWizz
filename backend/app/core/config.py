@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -36,6 +37,13 @@ class Settings(BaseSettings):
     demo_admin_email: str = "admin@datawizz.local"
     demo_admin_password: str = "datawizz123"
     demo_admin_name: str = "Demo Admin"
+    demo_analyst_email: str = "analyst@datawizz.local"
+    demo_analyst_password: str = "datawizz123"
+    demo_analyst_name: str = "Demo Analyst"
+    demo_viewer_email: str = "viewer@datawizz.local"
+    demo_viewer_password: str = "datawizz123"
+    demo_viewer_name: str = "Demo Viewer"
+    auth_session_ttl_hours: int = 168
 
 
 @lru_cache

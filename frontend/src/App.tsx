@@ -1,5 +1,6 @@
 import { Route, Routes } from 'react-router-dom'
 import { RequireAuth } from './auth/require-auth'
+import { RequireRole } from './auth/require-role'
 import { AppShell } from './components/app-shell'
 import { BiHomePage } from './pages/bi-home'
 import { CatalogPage } from './pages/catalog'
@@ -29,20 +30,24 @@ function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/files" element={<FileExplorerPage />} />
           <Route path="/sql" element={<SqlWorkspacePage />} />
-          <Route path="/engines" element={<EngineLabPage />} />
           <Route path="/catalog" element={<CatalogPage />} />
-          <Route path="/pipelines" element={<PipelineBuilderPage />} />
           <Route path="/runs" element={<PipelineRunsPage />} />
           <Route path="/logs" element={<JobLogsPage />} />
           <Route path="/bi" element={<BiHomePage />} />
-          <Route path="/bi/datasets" element={<DatasetsPage />} />
-          <Route path="/bi/charts/new" element={<ChartBuilderPage />} />
           <Route path="/bi/charts" element={<SavedChartsPage />} />
-          <Route path="/bi/dashboards/new" element={<DashboardBuilderPage />} />
           <Route path="/bi/dashboards" element={<DashboardViewerPage />} />
-          <Route path="/bi/reports" element={<ReportSchedulerPage />} />
           <Route path="/bi/superset" element={<SupersetSetupPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route element={<RequireRole roles={['admin', 'analyst']} />}>
+            <Route path="/engines" element={<EngineLabPage />} />
+            <Route path="/pipelines" element={<PipelineBuilderPage />} />
+            <Route path="/bi/datasets" element={<DatasetsPage />} />
+            <Route path="/bi/charts/new" element={<ChartBuilderPage />} />
+            <Route path="/bi/dashboards/new" element={<DashboardBuilderPage />} />
+            <Route path="/bi/reports" element={<ReportSchedulerPage />} />
+          </Route>
+          <Route element={<RequireRole roles={['admin']} />}>
+            <Route path="/settings" element={<SettingsPage />} />
+          </Route>
         </Route>
       </Route>
     </Routes>

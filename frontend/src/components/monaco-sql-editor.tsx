@@ -6,11 +6,13 @@ export function MonacoSqlEditor({
   onChange,
   height = 320,
   language = 'sql',
+  readOnly = false,
 }: {
   value: string
   onChange: (value: string) => void
   height?: number
   language?: string
+  readOnly?: boolean
 }) {
   const { theme } = useTheme()
 
@@ -31,6 +33,7 @@ export function MonacoSqlEditor({
         contextmenu: true,
         scrollBeyondLastLine: false,
         overviewRulerBorder: false,
+        readOnly,
       }}
     />
   )

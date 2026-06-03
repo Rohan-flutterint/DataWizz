@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { useAuth } from '../auth/auth-context'
 import { DataTable } from '../components/data-table'
 import { MonacoSqlEditor } from '../components/monaco-sql-editor'
 import { Button, Input, Label, PageHeader, Panel, Select } from '../components/ui'
@@ -16,6 +17,8 @@ function toRawViewName(fileName: string) {
 }
 
 export function SqlWorkspacePage() {
+  const { hasAnyRole } = useAuth()
+  const canEdit = hasAnyRole('admin', 'analyst')
   const { theme } = useTheme()
   const { activeEngineId } = useExecutionEngine()
   const queryClient = useQueryClient()
@@ -97,7 +100,7 @@ export function SqlWorkspacePage() {
         title="SQL Workspace"
         description="Query raw files and curated Delta outputs through DuckDB, iterate quickly in Monaco, and publish results back into the curated zone."
         actions={
-          <>
+          canEdit ? <>
             <Button disabled={queryMutation.isPending} onClick={() => queryMutation.mutate({ sql, limit: 200 })}>
               {queryMutation.isPending ? 'Running...' : 'Run Query'}
             </Button>
@@ -119,9 +122,15 @@ export function SqlWorkspacePage() {
             >
               {deltaMutation.isPending ? 'Writing...' : 'Write Delta'}
             </button>
-          </>
+          </> : undefined
         }
       />
+
+      {!canEdit ? (
+        <Panel className="border-slate-200 bg-slate-50 text-sm text-slate-700">
+          Your current role is read-only. You can inspect saved query history and sample outputs here, but query execution, exports, and Delta writes are limited to analysts and admins.
+        </Panel>
+      ) : null}
 
       {activeEngineId !== 'duckdb' ? (
         <Panel className="border-cyan-200 bg-cyan-50 text-cyan-900 dark:border-cyan-500/20 dark:bg-cyan-500/10 dark:text-cyan-100">
@@ -141,7 +150,7 @@ export function SqlWorkspacePage() {
             </div>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate/70">Preview limit 200 rows</span>
           </div>
-          <MonacoSqlEditor value={sql} onChange={setSql} height={340} />
+          <MonacoSqlEditor value={sql} onChange={setSql} height={340} readOnly={!canEdit} />
           <div className="border-t border-slate-100 px-5 py-4">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Queryable Views</p>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -176,17 +185,17 @@ export function SqlWorkspacePage() {
           <div className="grid gap-4 border-t border-slate-100 px-5 py-5 md:grid-cols-3">
             <div>
               <Label>Delta Table Name</Label>
-              <Input value={tableName} onChange={(event) => setTableName(event.target.value)} />
+              <Input value={tableName} onChange={(event) => setTableName(event.target.value)} disabled={!canEdit} />
             </div>
             <div>
               <Label>Write Mode</Label>
-              <Select value={deltaMode} onChange={(event) => setDeltaMode(event.target.value)}>
+              <Select value={deltaMode} onChange={(event) => setDeltaMode(event.target.value)} disabled={!canEdit}>
                 <option value="overwrite">overwrite</option>
                 <option value="append">append</option>
               </Select>
             </div>
             <div className="flex items-end">
-              <Button className="w-full" tone="ghost" onClick={() => setSql(defaultSql)}>
+              <Button className="w-full" tone="ghost" onClick={() => setSql(defaultSql)} disabled={!canEdit}>
                 Reset Example
               </Button>
             </div>

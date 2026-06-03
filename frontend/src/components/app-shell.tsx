@@ -16,9 +16,9 @@ const navGroups = [
       { label: 'Dashboard', to: '/', icon: LayoutDashboard, end: true },
       { label: 'File Explorer', to: '/files', icon: Database, end: true },
       { label: 'SQL Workspace', to: '/sql', icon: Sparkles, end: true },
-      { label: 'Engine Lab', to: '/engines', icon: Cpu, end: true },
+      { label: 'Engine Lab', to: '/engines', icon: Cpu, end: true, roles: ['admin', 'analyst'] },
       { label: 'Catalog', to: '/catalog', icon: TableProperties, end: true },
-      { label: 'Pipeline Builder', to: '/pipelines', icon: Workflow, end: true },
+      { label: 'Pipeline Builder', to: '/pipelines', icon: Workflow, end: true, roles: ['admin', 'analyst'] },
       { label: 'Pipeline Runs', to: '/runs', icon: PlaySquare, end: true },
       { label: 'Job Logs', to: '/logs', icon: Logs, end: true },
     ],
@@ -27,12 +27,12 @@ const navGroups = [
     title: 'BI Layer',
     items: [
       { label: 'BI Home', to: '/bi', icon: LayoutDashboard, end: true },
-      { label: 'Datasets', to: '/bi/datasets', icon: Database, end: true },
-      { label: 'Chart Builder', to: '/bi/charts/new', icon: LineChart, end: true },
+      { label: 'Datasets', to: '/bi/datasets', icon: Database, end: true, roles: ['admin', 'analyst'] },
+      { label: 'Chart Builder', to: '/bi/charts/new', icon: LineChart, end: true, roles: ['admin', 'analyst'] },
       { label: 'Saved Charts', to: '/bi/charts', icon: LineChart, end: true },
-      { label: 'Dashboard Builder', to: '/bi/dashboards/new', icon: LayoutDashboard, end: true },
+      { label: 'Dashboard Builder', to: '/bi/dashboards/new', icon: LayoutDashboard, end: true, roles: ['admin', 'analyst'] },
       { label: 'Dashboard Viewer', to: '/bi/dashboards', icon: TableProperties, end: true },
-      { label: 'Report Scheduler', to: '/bi/reports', icon: PlaySquare, end: true },
+      { label: 'Report Scheduler', to: '/bi/reports', icon: PlaySquare, end: true, roles: ['admin', 'analyst'] },
       { label: 'Superset Setup', to: '/bi/superset', icon: Sparkles, end: true },
     ],
   },
@@ -48,7 +48,7 @@ function kindTone(kind: string) {
 }
 
 export function AppShell() {
-  const { session, logout } = useAuth()
+  const { session, logout, hasAnyRole } = useAuth()
   const { activeEngineId } = useExecutionEngine()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
@@ -126,7 +126,7 @@ export function AppShell() {
               <div key={group.title}>
                 <p className={cn('mb-3 px-2 text-[11px] font-semibold uppercase tracking-[0.22em]', theme === 'dark' ? 'text-white/42' : 'text-slate-500')}>{group.title}</p>
                 <div className="space-y-1.5">
-                  {group.items.map((item) => (
+                  {group.items.filter((item) => !('roles' in item) || !item.roles || hasAnyRole(...item.roles)).map((item) => (
                     <NavLink
                       key={item.to}
                       to={item.to}
@@ -163,16 +163,18 @@ export function AppShell() {
               <p className={cn('font-semibold', theme === 'dark' ? 'text-white' : 'text-slate-900')}>Demo Mode</p>
               <p className="mt-2 leading-6">Local-first stack with DuckDB, Delta Lake, PostgreSQL metadata, and MinIO-ready storage paths.</p>
             </div>
-            <NavLink
-              to="/settings"
-              className={cn(
-                'mt-3 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition',
-                theme === 'dark' ? 'text-white/72 hover:bg-white/[0.05] hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
-              )}
-            >
-              <Settings2 className="h-4 w-4" />
-              Settings
-            </NavLink>
+            {hasAnyRole('admin') ? (
+              <NavLink
+                to="/settings"
+                className={cn(
+                  'mt-3 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition',
+                  theme === 'dark' ? 'text-white/72 hover:bg-white/[0.05] hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
+                )}
+              >
+                <Settings2 className="h-4 w-4" />
+                Settings
+              </NavLink>
+            ) : null}
           </div>
         </aside>
 
@@ -321,7 +323,9 @@ export function AppShell() {
                   </div>
                   <button
                     type="button"
-                    onClick={logout}
+                    onClick={() => {
+                      void logout()
+                    }}
                     className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/75 transition hover:bg-white/10 hover:text-white"
                   >
                     <LogOut className="h-4 w-4" />

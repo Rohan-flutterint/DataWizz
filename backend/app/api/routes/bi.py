@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import require_roles
 from app.db.session import get_db
 from app.models.bi import Chart, Dashboard, ReportSchedule, SemanticDataset
 from app.schemas.common import ApiMessage
@@ -50,7 +51,7 @@ def list_datasets(db: Session = Depends(get_db)) -> DatasetExplorerResponse:
     return DatasetExplorerResponse(items=stored, candidates=candidates)
 
 
-@router.post("/datasets", response_model=SemanticDatasetRead)
+@router.post("/datasets", response_model=SemanticDatasetRead, dependencies=[Depends(require_roles("admin", "analyst"))])
 def create_dataset(payload: SemanticDatasetCreateRequest, db: Session = Depends(get_db)) -> SemanticDatasetRead:
     data = payload.model_dump(by_alias=True)
     data["name"] = bi_service.resolve_dataset_name(db, payload.name)
@@ -65,7 +66,7 @@ def create_dataset(payload: SemanticDatasetCreateRequest, db: Session = Depends(
     return record
 
 
-@router.put("/datasets/{dataset_id}", response_model=SemanticDatasetRead)
+@router.put("/datasets/{dataset_id}", response_model=SemanticDatasetRead, dependencies=[Depends(require_roles("admin", "analyst"))])
 def update_dataset(dataset_id: str, payload: SemanticDatasetUpdateRequest, db: Session = Depends(get_db)) -> SemanticDatasetRead:
     record = db.query(SemanticDataset).filter(SemanticDataset.id == dataset_id).one_or_none()
     if record is None:
@@ -109,7 +110,7 @@ def list_charts(db: Session = Depends(get_db)) -> ChartListResponse:
     return ChartListResponse(items=items)
 
 
-@router.post("/charts", response_model=ChartRead)
+@router.post("/charts", response_model=ChartRead, dependencies=[Depends(require_roles("admin", "analyst"))])
 def create_chart(payload: ChartCreateRequest, db: Session = Depends(get_db)) -> ChartRead:
     record = Chart(**payload.model_dump())
     db.add(record)
@@ -118,7 +119,7 @@ def create_chart(payload: ChartCreateRequest, db: Session = Depends(get_db)) -> 
     return record
 
 
-@router.put("/charts/{chart_id}", response_model=ChartRead)
+@router.put("/charts/{chart_id}", response_model=ChartRead, dependencies=[Depends(require_roles("admin", "analyst"))])
 def update_chart(chart_id: str, payload: ChartUpdateRequest, db: Session = Depends(get_db)) -> ChartRead:
     record = db.query(Chart).filter(Chart.id == chart_id).one_or_none()
     if record is None:
@@ -140,7 +141,7 @@ def get_chart_traceability(chart_id: str, db: Session = Depends(get_db)) -> Char
     return ChartTraceabilityResponse.model_validate(payload)
 
 
-@router.delete("/charts/{chart_id}", response_model=ApiMessage)
+@router.delete("/charts/{chart_id}", response_model=ApiMessage, dependencies=[Depends(require_roles("admin", "analyst"))])
 def delete_chart(chart_id: str, db: Session = Depends(get_db)) -> ApiMessage:
     record = db.query(Chart).filter(Chart.id == chart_id).one_or_none()
     if record is None:
@@ -150,7 +151,7 @@ def delete_chart(chart_id: str, db: Session = Depends(get_db)) -> ApiMessage:
     return ApiMessage(message="Chart deleted successfully")
 
 
-@router.post("/charts/preview", response_model=ChartPreviewResponse)
+@router.post("/charts/preview", response_model=ChartPreviewResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def preview_chart(payload: dict, db: Session = Depends(get_db)) -> ChartPreviewResponse:
     sql = payload.get("sql")
     if not sql:
@@ -165,7 +166,7 @@ def list_dashboards(db: Session = Depends(get_db)) -> DashboardListResponse:
     return DashboardListResponse(items=items)
 
 
-@router.post("/dashboards", response_model=DashboardDetailResponse)
+@router.post("/dashboards", response_model=DashboardDetailResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def create_dashboard(payload: DashboardCreateRequest, db: Session = Depends(get_db)) -> DashboardDetailResponse:
     dashboard = Dashboard(
         name=bi_service.resolve_dashboard_name(db, payload.name),
@@ -184,7 +185,7 @@ def create_dashboard(payload: DashboardCreateRequest, db: Session = Depends(get_
     return DashboardDetailResponse(dashboard=dashboard, widgets=widgets)
 
 
-@router.put("/dashboards/{dashboard_id}", response_model=DashboardDetailResponse)
+@router.put("/dashboards/{dashboard_id}", response_model=DashboardDetailResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def update_dashboard(dashboard_id: str, payload: DashboardUpdateRequest, db: Session = Depends(get_db)) -> DashboardDetailResponse:
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).one_or_none()
     if dashboard is None:
@@ -218,7 +219,7 @@ def export_dashboard(dashboard_id: str, db: Session = Depends(get_db)) -> Stream
     )
 
 
-@router.post("/dashboards/import", response_model=DashboardImportResponse)
+@router.post("/dashboards/import", response_model=DashboardImportResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def import_dashboard(payload: DashboardImportRequest, db: Session = Depends(get_db)) -> DashboardImportResponse:
     try:
         dashboard, widgets, imported_charts = bi_service.import_dashboard_export(db, payload.model_dump())
@@ -227,7 +228,7 @@ def import_dashboard(payload: DashboardImportRequest, db: Session = Depends(get_
     return DashboardImportResponse(dashboard=dashboard, widgets=widgets, imported_charts=imported_charts)
 
 
-@router.post("/dashboards/{dashboard_id}/snapshots", response_model=DashboardSnapshotResponse)
+@router.post("/dashboards/{dashboard_id}/snapshots", response_model=DashboardSnapshotResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def create_dashboard_snapshot(dashboard_id: str, payload: DashboardSnapshotRequest, db: Session = Depends(get_db)) -> DashboardSnapshotResponse:
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).one_or_none()
     if dashboard is None:
@@ -252,7 +253,7 @@ def get_dashboard(dashboard_id: str, db: Session = Depends(get_db)) -> Dashboard
     return DashboardDetailResponse(dashboard=dashboard, widgets=widgets)
 
 
-@router.post("/report-schedules", response_model=ReportScheduleRead)
+@router.post("/report-schedules", response_model=ReportScheduleRead, dependencies=[Depends(require_roles("admin", "analyst"))])
 def create_report_schedule(payload: ReportScheduleCreateRequest, db: Session = Depends(get_db)) -> ReportScheduleRead:
     data = payload.model_dump()
     data["name"] = bi_service.resolve_report_schedule_name(db, payload.name)
@@ -273,7 +274,7 @@ def list_report_schedules(db: Session = Depends(get_db)) -> ReportScheduleListRe
     return ReportScheduleListResponse(items=items)
 
 
-@router.post("/report-schedules/{schedule_id}/run", response_model=ReportScheduleExecutionResponse)
+@router.post("/report-schedules/{schedule_id}/run", response_model=ReportScheduleExecutionResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def run_report_schedule(schedule_id: str, db: Session = Depends(get_db)) -> ReportScheduleExecutionResponse:
     record = db.query(ReportSchedule).filter(ReportSchedule.id == schedule_id).one_or_none()
     if record is None:
@@ -289,7 +290,7 @@ def list_report_snapshots(db: Session = Depends(get_db)) -> ReportSnapshotListRe
     return ReportSnapshotListResponse(items=items)
 
 
-@router.delete("/report-schedules/{schedule_id}", response_model=ApiMessage)
+@router.delete("/report-schedules/{schedule_id}", response_model=ApiMessage, dependencies=[Depends(require_roles("admin", "analyst"))])
 def delete_report_schedule(schedule_id: str, db: Session = Depends(get_db)) -> ApiMessage:
     record = db.query(ReportSchedule).filter(ReportSchedule.id == schedule_id).one_or_none()
     if record is None:

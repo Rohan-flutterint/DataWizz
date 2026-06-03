@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+
+from app.api.dependencies import require_roles
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -20,7 +22,7 @@ def list_files(db: Session = Depends(get_db)) -> FileListResponse:
     return FileListResponse(items=items)
 
 
-@router.post("/upload", response_model=FileUploadResponse)
+@router.post("/upload", response_model=FileUploadResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db)) -> FileUploadResponse:
     try:
         file_type = detect_file_type(file.filename or "")
@@ -60,7 +62,7 @@ def preview_file(file_id: str, db: Session = Depends(get_db)) -> FilePreviewResp
     return FilePreviewResponse(file=record, columns=preview["columns"], rows=preview["rows"])
 
 
-@router.delete("/{file_id}", response_model=FileDeleteResponse)
+@router.delete("/{file_id}", response_model=FileDeleteResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def delete_file(file_id: str, db: Session = Depends(get_db)) -> FileDeleteResponse:
     record = db.query(UploadedFile).filter(UploadedFile.id == file_id).one_or_none()
     if record is None:

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+from app.api.dependencies import require_roles
 from app.db.session import get_db
 from app.models.catalog import DeltaTable, UploadedFile
 from app.models.notebook import NotebookDocument, NotebookRun
@@ -62,7 +63,7 @@ def list_notebooks(db: Session = Depends(get_db)) -> NotebookListResponse:
     return NotebookListResponse(items=items)
 
 
-@router.post("/notebooks", response_model=NotebookDocumentRead)
+@router.post("/notebooks", response_model=NotebookDocumentRead, dependencies=[Depends(require_roles("admin", "analyst"))])
 def create_notebook(payload: NotebookDocumentCreateRequest, db: Session = Depends(get_db)) -> NotebookDocumentRead:
     record = NotebookDocument(
         name=_resolve_notebook_name(db, payload.name),
@@ -96,7 +97,7 @@ def get_notebook(notebook_id: str, db: Session = Depends(get_db)) -> NotebookDet
     return NotebookDetailResponse(notebook=notebook, recent_runs=recent_runs)
 
 
-@router.put("/notebooks/{notebook_id}", response_model=NotebookDocumentRead)
+@router.put("/notebooks/{notebook_id}", response_model=NotebookDocumentRead, dependencies=[Depends(require_roles("admin", "analyst"))])
 def update_notebook(
     notebook_id: str,
     payload: NotebookDocumentUpdateRequest,
@@ -120,7 +121,7 @@ def update_notebook(
     return notebook
 
 
-@router.post("/notebooks/{notebook_id}/duplicate", response_model=NotebookDocumentRead)
+@router.post("/notebooks/{notebook_id}/duplicate", response_model=NotebookDocumentRead, dependencies=[Depends(require_roles("admin", "analyst"))])
 def duplicate_notebook(notebook_id: str, db: Session = Depends(get_db)) -> NotebookDocumentRead:
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
@@ -142,7 +143,7 @@ def duplicate_notebook(notebook_id: str, db: Session = Depends(get_db)) -> Noteb
     return duplicate
 
 
-@router.delete("/notebooks/{notebook_id}", response_model=ApiMessage)
+@router.delete("/notebooks/{notebook_id}", response_model=ApiMessage, dependencies=[Depends(require_roles("admin", "analyst"))])
 def delete_notebook(notebook_id: str, db: Session = Depends(get_db)) -> ApiMessage:
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
@@ -153,7 +154,7 @@ def delete_notebook(notebook_id: str, db: Session = Depends(get_db)) -> ApiMessa
     return ApiMessage(message="Notebook deleted successfully")
 
 
-@router.post("/notebooks/{notebook_id}/run", response_model=NotebookRunExecutionResponse)
+@router.post("/notebooks/{notebook_id}/run", response_model=NotebookRunExecutionResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def run_saved_notebook(notebook_id: str, db: Session = Depends(get_db)) -> NotebookRunExecutionResponse:
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
@@ -174,7 +175,7 @@ def run_saved_notebook(notebook_id: str, db: Session = Depends(get_db)) -> Noteb
     return NotebookRunExecutionResponse(notebook=notebook, run=run, cell_results=cell_results)
 
 
-@router.post("/notebooks/{notebook_id}/cells/{cell_id}/run", response_model=NotebookCellActionResponse)
+@router.post("/notebooks/{notebook_id}/cells/{cell_id}/run", response_model=NotebookCellActionResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def run_single_cell(notebook_id: str, cell_id: str, db: Session = Depends(get_db)) -> NotebookCellActionResponse:
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
@@ -203,7 +204,7 @@ def run_single_cell(notebook_id: str, cell_id: str, db: Session = Depends(get_db
     )
 
 
-@router.post("/notebooks/{notebook_id}/cells/{cell_id}/run-from-here", response_model=NotebookCellActionResponse)
+@router.post("/notebooks/{notebook_id}/cells/{cell_id}/run-from-here", response_model=NotebookCellActionResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def run_from_cell(notebook_id: str, cell_id: str, db: Session = Depends(get_db)) -> NotebookCellActionResponse:
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
@@ -231,7 +232,7 @@ def run_from_cell(notebook_id: str, cell_id: str, db: Session = Depends(get_db))
     )
 
 
-@router.post("/notebooks/{notebook_id}/cells/{cell_id}/export")
+@router.post("/notebooks/{notebook_id}/cells/{cell_id}/export", dependencies=[Depends(require_roles("admin", "analyst"))])
 def export_notebook_cell(
     notebook_id: str,
     cell_id: str,
@@ -275,7 +276,7 @@ def export_notebook_cell(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/notebooks/{notebook_id}/cells/{cell_id}/write-delta", response_model=NotebookCellWriteDeltaResponse)
+@router.post("/notebooks/{notebook_id}/cells/{cell_id}/write-delta", response_model=NotebookCellWriteDeltaResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def write_notebook_cell_to_delta(
     notebook_id: str,
     cell_id: str,
@@ -309,7 +310,7 @@ def write_notebook_cell_to_delta(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/notebooks/execute", response_model=NotebookExecutionResponse)
+@router.post("/notebooks/execute", response_model=NotebookExecutionResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
 def execute_notebook(payload: NotebookExecutionRequest, db: Session = Depends(get_db)) -> NotebookExecutionResponse:
     try:
         return NotebookExecutionResponse.model_validate(

@@ -1,11 +1,13 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.dependencies import get_current_user
 from app.api.routes import bi, engines, files, pipelines, queries, system, tables
 from app.core.config import get_settings
 from app.db.base import *  # noqa: F403
 from app.db.runtime_schema import ensure_runtime_schema
-from app.db.session import Base, engine
+from app.db.session import Base, SessionLocal, engine
+from app.services.auth_service import auth_service
 from app.services.pipeline_scheduler_service import pipeline_scheduler_service
 from app.services.storage import StorageService
 
@@ -34,6 +36,11 @@ async def on_startup() -> None:
     storage_service.ensure_directories()
     Base.metadata.create_all(bind=engine)
     ensure_runtime_schema(engine)
+    db = SessionLocal()
+    try:
+        auth_service.ensure_seed_users(db)
+    finally:
+        db.close()
     await pipeline_scheduler_service.start()
 
 
@@ -43,12 +50,12 @@ async def on_shutdown() -> None:
 
 
 app.include_router(system.router, prefix=settings.api_prefix)
-app.include_router(engines.router, prefix=settings.api_prefix)
-app.include_router(files.router, prefix=settings.api_prefix)
-app.include_router(queries.router, prefix=settings.api_prefix)
-app.include_router(tables.router, prefix=settings.api_prefix)
-app.include_router(pipelines.router, prefix=settings.api_prefix)
-app.include_router(bi.router, prefix=settings.api_prefix)
+app.include_router(engines.router, prefix=settings.api_prefix, dependencies=[Depends(get_current_user)])
+app.include_router(files.router, prefix=settings.api_prefix, dependencies=[Depends(get_current_user)])
+app.include_router(queries.router, prefix=settings.api_prefix, dependencies=[Depends(get_current_user)])
+app.include_router(tables.router, prefix=settings.api_prefix, dependencies=[Depends(get_current_user)])
+app.include_router(pipelines.router, prefix=settings.api_prefix, dependencies=[Depends(get_current_user)])
+app.include_router(bi.router, prefix=settings.api_prefix, dependencies=[Depends(get_current_user)])
 
 
 @app.get("/health")
