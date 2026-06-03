@@ -399,6 +399,23 @@ export type NotebookRun = {
   updated_at: string
 }
 
+export type NotebookArtifact = {
+  id: string
+  notebook_id: string
+  notebook_run_id?: string | null
+  delta_table_id?: string | null
+  cell_id: string
+  cell_title?: string | null
+  artifact_kind: string
+  display_name: string
+  storage_path: string
+  download_name?: string | null
+  row_count?: number | null
+  metadata_json?: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+}
+
 export type NotebookCellRunResult = {
   cell_id: string
   title?: string | null
@@ -415,6 +432,7 @@ export type NotebookCellRunResult = {
 export type NotebookDetail = {
   notebook: NotebookDocument
   recent_runs: NotebookRun[]
+  recent_artifacts: NotebookArtifact[]
 }
 
 export type NotebookRunExecution = {

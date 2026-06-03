@@ -9,7 +9,7 @@ import { saveNotebookChartHandoff } from '../lib/chart-handoff'
 import { api } from '../lib/api'
 import { cn, formatDate } from '../lib/utils'
 import { useTheme } from '../theme/theme-context'
-import type { DeltaTable, ExecutionEngine, NotebookCell, NotebookCellRunResult, NotebookDocument, UploadedFile } from '../types'
+import type { DeltaTable, ExecutionEngine, NotebookArtifact, NotebookCell, NotebookCellRunResult, NotebookDocument, UploadedFile } from '../types'
 import { useNavigate } from 'react-router-dom'
 
 function capabilityPill(enabled: boolean, label: string, theme: 'light' | 'dark') {
@@ -360,6 +360,7 @@ export function EngineLabPage() {
       anchor.click()
       window.URL.revokeObjectURL(url)
       setRunFeedback(`${format.toUpperCase()} export started for ${cell.title || cell.id}`)
+      await queryClient.invalidateQueries({ queryKey: ['notebook-detail', selectedNotebookId] })
     } catch (error) {
       setRunError((error as Error).message)
     }
@@ -387,6 +388,7 @@ export function EngineLabPage() {
         },
       })
       await queryClient.invalidateQueries({ queryKey: ['tables'] })
+      await queryClient.invalidateQueries({ queryKey: ['notebook-detail', selectedNotebookId] })
       setRunFeedback(`Notebook result published to Delta as ${response.table.schema_name}.${response.table.name}`)
     } catch (error) {
       setRunError((error as Error).message)
@@ -430,6 +432,23 @@ export function EngineLabPage() {
   }
 
   const activeNotebookRuns = notebookDetailQuery.data?.recent_runs ?? []
+  const activeNotebookArtifacts = notebookDetailQuery.data?.recent_artifacts ?? []
+
+  const downloadArtifactFromHistory = async (artifact: NotebookArtifact) => {
+    try {
+      const blob = await api.downloadNotebookArtifact(artifact.id)
+      const url = window.URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = artifact.download_name || artifact.display_name
+      anchor.click()
+      window.URL.revokeObjectURL(url)
+      setRunFeedback(`Downloaded ${artifact.display_name}`)
+      setRunError(null)
+    } catch (error) {
+      setRunError((error as Error).message)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -676,6 +695,56 @@ export function EngineLabPage() {
                 ))
               ) : (
                 <p className="text-sm text-slate/75">Run history appears here after you execute a saved notebook.</p>
+              )}
+            </div>
+          </Panel>
+
+          <Panel>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Recent Artifacts</p>
+            <div className="mt-4 space-y-3">
+              {activeNotebookArtifacts.length ? (
+                activeNotebookArtifacts.map((artifact) => (
+                  <div key={artifact.id} className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-white/[0.03]' : 'border-slate-200 bg-slate-50')}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-ink">{artifact.display_name}</p>
+                        <p className="mt-1 text-sm text-slate/75">{artifact.cell_title || artifact.cell_id} · {artifact.row_count ?? 0} rows</p>
+                      </div>
+                      <span
+                        className={cn(
+                          'shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em]',
+                          artifact.artifact_kind === 'delta_publish'
+                            ? theme === 'dark'
+                              ? 'bg-cyan-500/15 text-cyan-300'
+                              : 'bg-cyan-100 text-lagoon'
+                            : theme === 'dark'
+                              ? 'bg-emerald-500/15 text-emerald-300'
+                              : 'bg-emerald-100 text-emerald-700',
+                        )}
+                      >
+                        {artifact.artifact_kind.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex items-center gap-2 text-xs text-slate/60">
+                      <Clock3 className="h-3.5 w-3.5" />
+                      {formatDate(artifact.created_at)}
+                    </div>
+                    <p className="mt-3 break-all text-xs text-slate/60">{artifact.storage_path}</p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {artifact.artifact_kind === 'delta_publish' && artifact.delta_table_id ? (
+                        <Button tone="ghost" onClick={() => navigate(`/catalog?tableId=${encodeURIComponent(artifact.delta_table_id || '')}`)}>
+                          Open in Catalog
+                        </Button>
+                      ) : (
+                        <Button tone="ghost" onClick={() => { void downloadArtifactFromHistory(artifact) }}>
+                          Download Again
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-slate/75">Exported files and Delta publishes from this notebook will appear here.</p>
               )}
             </div>
           </Panel>

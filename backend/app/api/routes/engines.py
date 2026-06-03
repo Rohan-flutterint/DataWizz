@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import Path
 
 import pyarrow.csv as pacsv
 import pyarrow.parquet as pq
@@ -6,12 +7,13 @@ from sqlalchemy import desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import require_roles
 from app.db.session import get_db
 from app.models.catalog import DeltaTable, UploadedFile
-from app.models.notebook import NotebookDocument, NotebookRun
+from app.models.notebook import NotebookArtifact, NotebookDocument, NotebookRun
 from app.schemas.common import ApiMessage
 from app.schemas.engines import EngineCatalogResponse, NotebookExecutionRequest, NotebookExecutionResponse
 from app.schemas.notebooks import (
@@ -94,7 +96,14 @@ def get_notebook(notebook_id: str, db: Session = Depends(get_db)) -> NotebookDet
         .limit(12)
         .all()
     )
-    return NotebookDetailResponse(notebook=notebook, recent_runs=recent_runs)
+    recent_artifacts = (
+        db.query(NotebookArtifact)
+        .filter(NotebookArtifact.notebook_id == notebook_id)
+        .order_by(desc(NotebookArtifact.created_at))
+        .limit(20)
+        .all()
+    )
+    return NotebookDetailResponse(notebook=notebook, recent_runs=recent_runs, recent_artifacts=recent_artifacts)
 
 
 @router.put("/notebooks/{notebook_id}", response_model=NotebookDocumentRead, dependencies=[Depends(require_roles("admin", "analyst"))])
@@ -252,21 +261,55 @@ def export_notebook_cell(
         )
         safe_name = slugify_identifier(payload.file_name or f"{notebook.name}_{materialized['cell'].get('title') or cell_id}")
         arrow_table = materialized["arrow_table"]
+        exports_dir = Path(execution_engine_service.settings.temp_storage_path) / "notebook_artifacts" / notebook.id
+        exports_dir.mkdir(parents=True, exist_ok=True)
         if payload.format == "csv":
-            output = BytesIO()
-            pacsv.write_csv(arrow_table, output)
-            output.seek(0)
+            file_path = exports_dir / f"{safe_name}.csv"
+            pacsv.write_csv(arrow_table, file_path)
+            artifact = NotebookArtifact(
+                notebook_id=notebook.id,
+                cell_id=cell_id,
+                cell_title=materialized["cell"].get("title"),
+                artifact_kind="export_csv",
+                display_name=f"{materialized['cell'].get('title') or cell_id} CSV export",
+                storage_path=str(file_path),
+                download_name=f"{safe_name}.csv",
+                row_count=materialized["row_count"],
+                metadata_json={
+                    "format": "csv",
+                    "columns": materialized["columns"],
+                    "engine_id": notebook.engine_id,
+                },
+            )
+            db.add(artifact)
+            db.commit()
             return StreamingResponse(
-                output,
+                open(file_path, "rb"),
                 media_type="text/csv",
                 headers={"Content-Disposition": f'attachment; filename="{safe_name}.csv"'},
             )
 
-        output = BytesIO()
-        pq.write_table(arrow_table, output)
-        output.seek(0)
+        file_path = exports_dir / f"{safe_name}.parquet"
+        pq.write_table(arrow_table, file_path)
+        artifact = NotebookArtifact(
+            notebook_id=notebook.id,
+            cell_id=cell_id,
+            cell_title=materialized["cell"].get("title"),
+            artifact_kind="export_parquet",
+            display_name=f"{materialized['cell'].get('title') or cell_id} Parquet export",
+            storage_path=str(file_path),
+            download_name=f"{safe_name}.parquet",
+            row_count=materialized["row_count"],
+            metadata_json={
+                "format": "parquet",
+                "columns": materialized["columns"],
+                "engine_id": notebook.engine_id,
+            },
+        )
+        db.add(artifact)
+        db.commit()
         return StreamingResponse(
-            output,
+            open(file_path, "rb"),
             media_type="application/octet-stream",
             headers={"Content-Disposition": f'attachment; filename="{safe_name}.parquet"'},
         )
@@ -303,11 +346,49 @@ def write_notebook_cell_to_delta(
             description=payload.description,
             source_query=f"Notebook cell export from {notebook.name}::{materialized['cell'].get('title') or cell_id} via {notebook.engine_id}",
         )
+        artifact = NotebookArtifact(
+            notebook_id=notebook.id,
+            delta_table_id=table.id,
+            cell_id=cell_id,
+            cell_title=materialized["cell"].get("title"),
+            artifact_kind="delta_publish",
+            display_name=f"{materialized['cell'].get('title') or cell_id} Delta publish",
+            storage_path=table.storage_path,
+            download_name=None,
+            row_count=materialized["row_count"],
+            metadata_json={
+                "table_name": table.name,
+                "schema_name": table.schema_name,
+                "mode": payload.mode,
+                "engine_id": notebook.engine_id,
+                "columns": materialized["columns"],
+            },
+        )
+        db.add(artifact)
+        db.commit()
         return NotebookCellWriteDeltaResponse(message="Notebook result written to Delta successfully", table=table)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get(
+    "/notebooks/artifacts/{artifact_id}/download",
+    response_class=FileResponse,
+    dependencies=[Depends(require_roles("admin", "analyst"))],
+)
+def download_notebook_artifact(artifact_id: str, db: Session = Depends(get_db)) -> FileResponse:
+    artifact = db.query(NotebookArtifact).filter(NotebookArtifact.id == artifact_id).one_or_none()
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Notebook artifact not found")
+    if artifact.artifact_kind not in {"export_csv", "export_parquet"}:
+        raise HTTPException(status_code=400, detail="Only exported notebook files can be downloaded directly")
+    file_path = Path(artifact.storage_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Notebook artifact file is no longer available on disk")
+    media_type = "text/csv" if artifact.artifact_kind == "export_csv" else "application/octet-stream"
+    return FileResponse(path=file_path, media_type=media_type, filename=artifact.download_name or file_path.name)
 
 
 @router.post("/notebooks/execute", response_model=NotebookExecutionResponse, dependencies=[Depends(require_roles("admin", "analyst"))])

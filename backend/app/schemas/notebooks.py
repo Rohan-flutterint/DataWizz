@@ -58,6 +58,20 @@ class NotebookRunRead(TimestampedModel):
     run_summary: dict | None = None
 
 
+class NotebookArtifactRead(TimestampedModel):
+    notebook_id: str
+    notebook_run_id: str | None = None
+    delta_table_id: str | None = None
+    cell_id: str
+    cell_title: str | None = None
+    artifact_kind: str
+    display_name: str
+    storage_path: str
+    download_name: str | None = None
+    row_count: int | None = None
+    metadata_json: dict | None = None
+
+
 class NotebookListResponse(BaseModel):
     items: list[NotebookDocumentRead]
 
@@ -65,6 +79,7 @@ class NotebookListResponse(BaseModel):
 class NotebookDetailResponse(BaseModel):
     notebook: NotebookDocumentRead
     recent_runs: list[NotebookRunRead]
+    recent_artifacts: list[NotebookArtifactRead]
 
 
 class NotebookRunExecutionResponse(BaseModel):
