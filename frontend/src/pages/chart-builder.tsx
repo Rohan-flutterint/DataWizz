@@ -5,6 +5,7 @@ import { ChartRenderer } from '../components/chart-renderer'
 import { DataTable } from '../components/data-table'
 import { MonacoSqlEditor } from '../components/monaco-sql-editor'
 import { Button, EmptyState, Input, Label, PageHeader, Panel, Select } from '../components/ui'
+import { clearNotebookChartHandoff, readNotebookChartHandoff, type NotebookChartHandoff } from '../lib/chart-handoff'
 import { api } from '../lib/api'
 
 type MetricOption = {
@@ -64,6 +65,26 @@ function inferMetrics(schema: { name: string; type: string }[] = [], datasetMetr
   return [...semanticMetrics, ...numericMetrics]
 }
 
+function inferSnapshotMetrics(columns: string[] = [], rows: Record<string, unknown>[] = []): MetricOption[] {
+  return columns
+    .filter((column) =>
+      rows.some((row) => {
+        const value = row[column]
+        return typeof value === 'number' || (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)))
+      }),
+    )
+    .map((column) => ({
+      key: `snapshot:${column}`,
+      label: column,
+      expression: column,
+      alias: column,
+    }))
+}
+
+function inferSnapshotDimensions(columns: string[] = []): DimensionOption[] {
+  return columns.map((column) => ({ key: column, label: column }))
+}
+
 function buildChartSql({
   sourceRef,
   chartType,
@@ -117,6 +138,20 @@ export function ChartBuilderPage() {
   const [kpiThresholdDirection, setKpiThresholdDirection] = useState<'>=' | '<='>('>=')
   const [sql, setSql] = useState('')
   const [statusMessage, setStatusMessage] = useState('Choose a semantic dataset, pick a dimension and metric, then generate a chart query.')
+  const [notebookHandoff, setNotebookHandoff] = useState<NotebookChartHandoff | null>(null)
+
+  useEffect(() => {
+    const handoff = readNotebookChartHandoff()
+    if (!handoff) return
+    setNotebookHandoff(handoff)
+    setName(handoff.chartName)
+    setChartType((handoff.chartType as (typeof chartTypes)[number]) || 'bar')
+    setDatasetId('')
+    setDimensionKey(handoff.categoryKey ?? handoff.columns[0] ?? '')
+    setMetricKey(handoff.valueKey ? `snapshot:${handoff.valueKey}` : '')
+    setSql('-- Notebook snapshot chart powered by Engine Lab output')
+    setStatusMessage(`Loaded notebook output from ${handoff.notebookName}${handoff.cellTitle ? ` · ${handoff.cellTitle}` : ''}. Preview and save it as a BI chart.`)
+  }, [])
 
   const selectedDataset = useMemo(
     () => datasetsQuery.data?.items.find((dataset) => dataset.id === datasetId) ?? null,
@@ -124,43 +159,52 @@ export function ChartBuilderPage() {
   )
 
   const dimensionOptions = useMemo(
-    () => inferDimensions(selectedDataset?.schema_json ?? [], (selectedDataset?.dimensions_json as Record<string, unknown>[] | undefined) ?? []),
-    [selectedDataset],
+    () =>
+      notebookHandoff
+        ? inferSnapshotDimensions(notebookHandoff.columns)
+        : inferDimensions(selectedDataset?.schema_json ?? [], (selectedDataset?.dimensions_json as Record<string, unknown>[] | undefined) ?? []),
+    [notebookHandoff, selectedDataset],
   )
 
   const metricOptions = useMemo(
-    () => inferMetrics(selectedDataset?.schema_json ?? [], (selectedDataset?.metrics_json as Record<string, unknown>[] | undefined) ?? []),
-    [selectedDataset],
+    () =>
+      notebookHandoff
+        ? inferSnapshotMetrics(notebookHandoff.columns, notebookHandoff.rows)
+        : inferMetrics(selectedDataset?.schema_json ?? [], (selectedDataset?.metrics_json as Record<string, unknown>[] | undefined) ?? []),
+    [notebookHandoff, selectedDataset],
   )
 
   const selectedMetric = metricOptions.find((metric) => metric.key === metricKey) ?? null
 
   useEffect(() => {
+    if (notebookHandoff) return
     const firstDataset = datasetsQuery.data?.items[0]
     if (!datasetId && firstDataset) {
       setDatasetId(firstDataset.id)
     }
-  }, [datasetId, datasetsQuery.data])
+  }, [datasetId, datasetsQuery.data, notebookHandoff])
 
   useEffect(() => {
-    if (!selectedDataset) return
+    if (!selectedDataset && !notebookHandoff) return
     if (!dimensionOptions.find((dimension) => dimension.key === dimensionKey)) {
       setDimensionKey(dimensionOptions[0]?.key ?? '')
     }
     if (!metricOptions.find((metric) => metric.key === metricKey)) {
       setMetricKey(metricOptions[0]?.key ?? '')
     }
-    setStatusMessage(`Modeling chart SQL from semantic dataset ${selectedDataset.name}.`)
-  }, [dimensionKey, dimensionOptions, metricKey, metricOptions, selectedDataset])
+    if (!notebookHandoff && selectedDataset) {
+      setStatusMessage(`Modeling chart SQL from semantic dataset ${selectedDataset.name}.`)
+    }
+  }, [dimensionKey, dimensionOptions, metricKey, metricOptions, notebookHandoff, selectedDataset])
 
   useEffect(() => {
-    if (!selectedDataset || !selectedMetric) return
+    if ((!selectedDataset && !notebookHandoff) || !selectedMetric) return
     const defaultName =
       chartType === 'kpi'
         ? `${selectedMetric.alias.replace(/_/g, ' ')} KPI`
         : `${selectedMetric.alias.replace(/_/g, ' ')} by ${dimensionKey || 'dimension'}`
     setName((current) => (current.trim() ? current : defaultName))
-  }, [chartType, dimensionKey, selectedDataset, selectedMetric])
+  }, [chartType, dimensionKey, notebookHandoff, selectedDataset, selectedMetric])
 
   useEffect(() => {
     if (!selectedMetric) return
@@ -188,6 +232,7 @@ export function ChartBuilderPage() {
   const saveMutation = useMutation({
     mutationFn: api.createChart,
     onSuccess: (chart) => {
+      clearNotebookChartHandoff()
       queryClient.invalidateQueries({ queryKey: ['bi', 'charts'] })
       setName(chart.name)
       setStatusMessage(`Saved chart ${chart.name}.`)
@@ -199,6 +244,10 @@ export function ChartBuilderPage() {
   })
 
   const generateSql = () => {
+    if (notebookHandoff) {
+      setStatusMessage('Notebook-backed charts use the captured cell output directly, so there is no dataset SQL to generate here.')
+      return
+    }
     if (!selectedDataset || !selectedMetric) {
       setStatusMessage('Select a semantic dataset and metric before generating chart SQL.')
       return
@@ -222,12 +271,12 @@ export function ChartBuilderPage() {
     setStatusMessage(`Generated SQL for ${selectedDataset.name}. You can preview it or keep editing manually.`)
   }
 
-  const previewRows = previewMutation.data?.rows ?? []
-  const previewColumns = previewMutation.data?.columns ?? []
+  const previewRows = notebookHandoff ? notebookHandoff.rows : previewMutation.data?.rows ?? []
+  const previewColumns = notebookHandoff ? notebookHandoff.columns : previewMutation.data?.columns ?? []
   const previewValueKey = selectedMetric?.alias || previewColumns[1]
 
   const saveChart = () => {
-    if (!sql.trim()) {
+    if (!sql.trim() && !notebookHandoff) {
       setStatusMessage('Generate or enter chart SQL before saving.')
       return
     }
@@ -236,14 +285,14 @@ export function ChartBuilderPage() {
       name,
       chart_type: chartType,
       dataset_id: datasetId || undefined,
-      query_sql: sql,
+      query_sql: notebookHandoff ? '-- Notebook snapshot chart from Engine Lab' : sql,
       config_json: {
         chartType,
         datasetName: selectedDataset?.name,
-        sourceRef: selectedDataset?.source_ref,
+        sourceRef: notebookHandoff ? `notebook:${notebookHandoff.notebookName}` : selectedDataset?.source_ref,
         dimensionKey: chartType === 'kpi' ? null : dimensionKey,
         metricKey,
-        metricAlias: selectedMetric?.alias,
+        metricAlias: notebookHandoff ? (selectedMetric?.alias || notebookHandoff.valueKey || previewColumns[1]) : selectedMetric?.alias,
         sortBy,
         sortDirection,
         rowLimit: Number(rowLimit),
@@ -256,9 +305,19 @@ export function ChartBuilderPage() {
         kpiSubtitle: chartType === 'kpi' ? kpiSubtitle || selectedMetric?.label : null,
         kpiThresholdValue: chartType === 'kpi' && kpiThresholdValue ? Number(kpiThresholdValue) : null,
         kpiThresholdDirection: chartType === 'kpi' ? kpiThresholdDirection : null,
+        snapshotSource: notebookHandoff ? 'notebook' : null,
+        snapshotNotebookName: notebookHandoff?.notebookName ?? null,
+        snapshotCellId: notebookHandoff?.cellId ?? null,
+        snapshotCellTitle: notebookHandoff?.cellTitle ?? null,
+        snapshotColumns: notebookHandoff ? notebookHandoff.columns : null,
+        snapshotRows: notebookHandoff ? notebookHandoff.rows : null,
       },
     })
   }
+
+  const notebookSourceLabel = notebookHandoff
+    ? `${notebookHandoff.notebookName}${notebookHandoff.cellTitle ? ` · ${notebookHandoff.cellTitle}` : ''}`
+    : null
 
   return (
     <div className="space-y-6">
@@ -271,8 +330,18 @@ export function ChartBuilderPage() {
             <Button tone="ghost" onClick={generateSql}>
               Generate SQL
             </Button>
-            <Button tone="ghost" disabled={previewMutation.isPending} onClick={() => previewMutation.mutate({ sql, limit: 200 })}>
-              {previewMutation.isPending ? 'Previewing...' : 'Preview Chart'}
+            <Button
+              tone="ghost"
+              disabled={notebookHandoff ? false : previewMutation.isPending}
+              onClick={() => {
+                if (notebookHandoff) {
+                  setStatusMessage(`Previewing notebook snapshot from ${notebookSourceLabel}.`)
+                  return
+                }
+                previewMutation.mutate({ sql, limit: 200 })
+              }}
+            >
+              {notebookHandoff ? 'Preview Snapshot' : previewMutation.isPending ? 'Previewing...' : 'Preview Chart'}
             </Button>
             <Button disabled={saveMutation.isPending} onClick={saveChart}>
               {saveMutation.isPending ? 'Saving...' : 'Save Chart'}
@@ -284,11 +353,19 @@ export function ChartBuilderPage() {
       <Panel className="grid gap-4 xl:grid-cols-[1fr_0.9fr_1fr]">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Chart Setup</p>
-          <p className="mt-2 text-sm leading-6 text-slate/75">Pick a semantic dataset, choose the dimension and metric you want to visualize, and generate the query that will power the chart.</p>
+          <p className="mt-2 text-sm leading-6 text-slate/75">
+            {notebookHandoff
+              ? 'This draft chart is powered by notebook cell output captured from Engine Lab. You can style it and save it directly into the BI layer.'
+              : 'Pick a semantic dataset, choose the dimension and metric you want to visualize, and generate the query that will power the chart.'}
+          </p>
         </div>
         <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate/75">
-          <p className="font-semibold text-ink">Supported Types</p>
-          <p className="mt-2 leading-6">Bar, line, area, pie, donut, timeseries, and KPI visuals are supported in the first BI build.</p>
+          <p className="font-semibold text-ink">{notebookHandoff ? 'Notebook Source' : 'Supported Types'}</p>
+          <p className="mt-2 leading-6">
+            {notebookHandoff
+              ? `Cell result handoff from ${notebookSourceLabel}. This chart will keep a snapshot of the notebook rows so it can still render inside dashboards later.`
+              : 'Bar, line, area, pie, donut, timeseries, and KPI visuals are supported in the first BI build.'}
+          </p>
         </div>
         <div className="rounded-2xl bg-cyan-50 p-4 text-sm text-lagoon">
           <p className="font-semibold">Builder Status</p>
@@ -297,7 +374,7 @@ export function ChartBuilderPage() {
         </div>
       </Panel>
 
-      {datasetsQuery.data?.items?.length ? (
+      {datasetsQuery.data?.items?.length || notebookHandoff ? (
         <div className="grid gap-5 xl:grid-cols-[1.15fr_minmax(0,1fr)]">
           <div className="space-y-5">
             <Panel className="space-y-4">
@@ -318,14 +395,20 @@ export function ChartBuilderPage() {
                 </div>
                 <div>
                   <Label>Semantic Dataset</Label>
-                  <Select value={datasetId} onChange={(event) => setDatasetId(event.target.value)}>
-                    <option value="">Select a dataset</option>
-                    {datasetsQuery.data?.items.map((dataset) => (
-                      <option key={dataset.id} value={dataset.id}>
-                        {dataset.name}
-                      </option>
-                    ))}
-                  </Select>
+                  {notebookHandoff ? (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-700">
+                      Notebook Snapshot · {notebookSourceLabel}
+                    </div>
+                  ) : (
+                    <Select value={datasetId} onChange={(event) => setDatasetId(event.target.value)}>
+                      <option value="">Select a dataset</option>
+                      {datasetsQuery.data?.items.map((dataset) => (
+                        <option key={dataset.id} value={dataset.id}>
+                          {dataset.name}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
                 </div>
                 <div>
                   <Label>Metric</Label>
@@ -434,8 +517,18 @@ export function ChartBuilderPage() {
                 <Button tone="ghost" onClick={generateSql}>
                   Generate Guided SQL
                 </Button>
-                <Button tone="ghost" disabled={previewMutation.isPending} onClick={() => previewMutation.mutate({ sql, limit: 200 })}>
-                  {previewMutation.isPending ? 'Previewing...' : 'Preview Chart'}
+                <Button
+                  tone="ghost"
+                  disabled={notebookHandoff ? false : previewMutation.isPending}
+                  onClick={() => {
+                    if (notebookHandoff) {
+                      setStatusMessage(`Previewing notebook snapshot from ${notebookSourceLabel}.`)
+                      return
+                    }
+                    previewMutation.mutate({ sql, limit: 200 })
+                  }}
+                >
+                  {notebookHandoff ? 'Preview Snapshot' : previewMutation.isPending ? 'Previewing...' : 'Preview Chart'}
                 </Button>
                 <Button disabled={saveMutation.isPending} onClick={saveChart}>
                   {saveMutation.isPending ? 'Saving...' : 'Save Chart'}
@@ -457,7 +550,11 @@ export function ChartBuilderPage() {
               <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <p className="text-sm font-semibold text-ink">Ready to add this chart to the library?</p>
-                  <p className="mt-1 text-sm text-slate/70">Previewing checks the query only. Saving publishes it to the `Saved Charts` tab.</p>
+                  <p className="mt-1 text-sm text-slate/70">
+                    {notebookHandoff
+                      ? 'Saving publishes this notebook-backed snapshot into `Saved Charts`, where it can also be embedded into dashboards.'
+                      : 'Previewing checks the query only. Saving publishes it to the `Saved Charts` tab.'}
+                  </p>
                 </div>
                 <Button className="min-w-44" disabled={saveMutation.isPending} onClick={saveChart}>
                   {saveMutation.isPending ? 'Saving...' : 'Save Chart To Library'}
@@ -472,18 +569,22 @@ export function ChartBuilderPage() {
             <Panel className="space-y-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Dataset Context</p>
-                  <h2 className="mt-2 font-display text-2xl text-ink">{selectedDataset?.name || 'Select a dataset'}</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate/70">{selectedDataset?.description || 'Semantic dataset metadata and reusable metrics will appear here.'}</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">{notebookHandoff ? 'Notebook Context' : 'Dataset Context'}</p>
+                  <h2 className="mt-2 font-display text-2xl text-ink">{notebookHandoff ? notebookSourceLabel : selectedDataset?.name || 'Select a dataset'}</h2>
+                  <p className="mt-2 text-sm leading-6 text-slate/70">
+                    {notebookHandoff
+                      ? 'This chart is being modeled from captured notebook output rather than a reusable semantic dataset. Save it to preserve the snapshot for dashboards.'
+                      : selectedDataset?.description || 'Semantic dataset metadata and reusable metrics will appear here.'}
+                  </p>
                 </div>
                 <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-lagoon">
-                  {selectedDataset?.source_ref || 'BI'}
+                  {notebookHandoff ? 'Notebook Snapshot' : selectedDataset?.source_ref || 'BI'}
                 </span>
               </div>
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="rounded-2xl bg-slate-50 p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Columns</p>
-                  <p className="mt-2 font-display text-2xl text-ink">{selectedDataset?.schema_json?.length ?? 0}</p>
+                  <p className="mt-2 font-display text-2xl text-ink">{notebookHandoff ? notebookHandoff.columns.length : selectedDataset?.schema_json?.length ?? 0}</p>
                 </div>
                 <div className="rounded-2xl bg-slate-50 p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Dimensions</p>

@@ -7,6 +7,7 @@ import 'react-resizable/css/styles.css'
 import { ChartRenderer } from '../components/chart-renderer'
 import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
 import { api } from '../lib/api'
+import { getChartSnapshot } from '../lib/chart-handoff'
 
 type WidgetState = {
   i: string
@@ -120,10 +121,11 @@ export function DashboardBuilderPage() {
   const widgetChartQueries = useQueries({
     queries: widgets.map((widget) => {
       const chart = widget.chartId ? chartById.get(widget.chartId) : undefined
+      const chartSnapshot = getChartSnapshot((chart?.config_json ?? {}) as Record<string, unknown>)
       return {
         queryKey: ['bi', 'dashboard-builder', widget.i, 'preview'],
         queryFn: () => api.previewChart({ sql: chart?.query_sql ?? 'SELECT 1 AS value', limit: 50 }),
-        enabled: widget.widgetType === 'chart' && Boolean(chart?.query_sql),
+        enabled: widget.widgetType === 'chart' && Boolean(chart?.query_sql) && !chartSnapshot,
       }
     }),
   })
@@ -566,6 +568,7 @@ export function DashboardBuilderPage() {
                   const chart = widget.chartId ? chartById.get(widget.chartId) : undefined
                   const preview = widgetChartQueries[index]?.data
                   const config = (chart?.config_json ?? {}) as Record<string, unknown>
+                  const chartSnapshot = getChartSnapshot(config)
 
                   return (
                     <div
@@ -579,10 +582,14 @@ export function DashboardBuilderPage() {
                         <div className="h-full p-4">
                           <ChartRenderer
                             chartType={chart?.chart_type ?? 'bar'}
-                            rows={preview?.rows ?? []}
+                            rows={chartSnapshot?.rows ?? preview?.rows ?? []}
                             title={widget.title}
-                            categoryKey={chart?.chart_type === 'kpi' ? undefined : String(preview?.columns?.[0] ?? '')}
-                            valueKey={String(config.metricAlias ?? preview?.columns?.[1] ?? '')}
+                            categoryKey={
+                              chart?.chart_type === 'kpi'
+                                ? undefined
+                                : String(config.dimensionKey ?? chartSnapshot?.columns?.[0] ?? preview?.columns?.[0] ?? '')
+                            }
+                            valueKey={String(config.metricAlias ?? chartSnapshot?.columns?.[1] ?? preview?.columns?.[1] ?? '')}
                             config={config}
                           />
                         </div>

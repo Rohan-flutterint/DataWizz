@@ -5,6 +5,7 @@ import { ChartRenderer } from '../components/chart-renderer'
 import { DataTable } from '../components/data-table'
 import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
 import { api } from '../lib/api'
+import { getChartSnapshot } from '../lib/chart-handoff'
 import { formatDate } from '../lib/utils'
 
 export function SavedChartsPage() {
@@ -74,13 +75,16 @@ export function SavedChartsPage() {
 
   const selectedChart = filteredCharts.find((chart) => chart.id === selectedChartId) ?? charts.find((chart) => chart.id === selectedChartId) ?? null
   const selectedConfig = (selectedChart?.config_json ?? {}) as Record<string, unknown>
+  const selectedSnapshot = getChartSnapshot(selectedConfig)
   const selectedDatasetName =
-    (selectedChart?.dataset_id && datasetNameById.get(selectedChart.dataset_id)) || String(selectedConfig.datasetName ?? 'Not linked')
+    selectedSnapshot
+      ? `Notebook Snapshot${selectedConfig.snapshotNotebookName ? ` · ${String(selectedConfig.snapshotNotebookName)}` : ''}`
+      : (selectedChart?.dataset_id && datasetNameById.get(selectedChart.dataset_id)) || String(selectedConfig.datasetName ?? 'Not linked')
 
   const previewQuery = useQuery({
     queryKey: ['bi', 'charts', 'preview', selectedChartId],
     queryFn: () => api.previewChart({ sql: selectedChart!.query_sql, limit: 200 }),
-    enabled: Boolean(selectedChart),
+    enabled: Boolean(selectedChart) && !selectedSnapshot,
   })
   const traceabilityQuery = useQuery({
     queryKey: ['bi', 'charts', selectedChartId, 'traceability'],
@@ -155,7 +159,11 @@ export function SavedChartsPage() {
         </div>
         <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate/75">
           <p className="font-semibold text-ink">Library Workflow</p>
-          <p className="mt-2 leading-6">Saved charts preserve the semantic dataset link, generated SQL, and visualization config that dashboards will reuse.</p>
+          <p className="mt-2 leading-6">
+            {selectedSnapshot
+              ? 'Notebook-backed charts preserve a snapshot of the cell output so they can keep rendering inside dashboards even without rerunning the notebook.'
+              : 'Saved charts preserve the semantic dataset link, generated SQL, and visualization config that dashboards will reuse.'}
+          </p>
         </div>
         <div className="rounded-2xl bg-cyan-50 p-4 text-sm text-lagoon">
           <p className="font-semibold">Library Status</p>
@@ -217,7 +225,9 @@ export function SavedChartsPage() {
                       <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Selected Chart</p>
                       <h2 className="mt-2 font-display text-3xl text-ink">{selectedChart.name}</h2>
                       <p className="mt-3 text-sm leading-6 text-slate/70">
-                        This saved chart can be embedded into dashboards and reused across BI workflows without rebuilding the query.
+                        {selectedSnapshot
+                          ? 'This saved chart is backed by notebook snapshot output and can be embedded into dashboards without depending on a live SQL preview.'
+                          : 'This saved chart can be embedded into dashboards and reused across BI workflows without rebuilding the query.'}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -228,7 +238,7 @@ export function SavedChartsPage() {
                           name: editName,
                           chart_type: editChartType,
                           dataset_id: editDatasetId || undefined,
-                          query_sql: editSql,
+                          query_sql: selectedSnapshot ? '-- Notebook snapshot chart from Engine Lab' : editSql,
                           config_json: {
                             ...selectedConfig,
                             dimensionKey: editDimensionKey || null,
@@ -304,6 +314,11 @@ export function SavedChartsPage() {
                     {selectedConfig.numberFormat ? (
                       <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
                         Format: {String(selectedConfig.numberFormat)}
+                      </span>
+                    ) : null}
+                    {selectedSnapshot ? (
+                      <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700">
+                        Snapshot-backed
                       </span>
                     ) : null}
                     {selectedConfig.sortDirection ? (
@@ -488,22 +503,30 @@ export function SavedChartsPage() {
 
                     <ChartRenderer
                       chartType={selectedChart.chart_type}
-                      rows={previewQuery.data?.rows ?? []}
+                      rows={selectedSnapshot?.rows ?? previewQuery.data?.rows ?? []}
                       title={selectedChart.name}
-                      categoryKey={selectedChart.chart_type === 'kpi' ? undefined : String(previewQuery.data?.columns?.[0] ?? '')}
-                      valueKey={String(selectedConfig.metricAlias ?? previewQuery.data?.columns?.[1] ?? '')}
+                      categoryKey={
+                        selectedChart.chart_type === 'kpi'
+                          ? undefined
+                          : String(selectedConfig.dimensionKey ?? selectedSnapshot?.columns?.[0] ?? previewQuery.data?.columns?.[0] ?? '')
+                      }
+                      valueKey={String(selectedConfig.metricAlias ?? selectedSnapshot?.columns?.[1] ?? previewQuery.data?.columns?.[1] ?? '')}
                       config={selectedConfig}
                     />
                     <Panel className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Preview Result</p>
-                        <h3 className="mt-2 font-display text-2xl text-ink">{previewQuery.data?.row_count ?? 0} rows</h3>
+                        <h3 className="mt-2 font-display text-2xl text-ink">{selectedSnapshot?.rows.length ?? previewQuery.data?.row_count ?? 0} rows</h3>
                       </div>
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate/70">Live query preview</span>
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate/70">
+                        {selectedSnapshot ? 'Notebook snapshot preview' : 'Live query preview'}
+                      </span>
                     </Panel>
                   </div>
 
-                  {previewQuery.data ? (
+                  {selectedSnapshot ? (
+                    <DataTable columns={selectedSnapshot.columns} rows={selectedSnapshot.rows} />
+                  ) : previewQuery.data ? (
                     <DataTable columns={previewQuery.data.columns} rows={previewQuery.data.rows} />
                   ) : (
                     <Panel>

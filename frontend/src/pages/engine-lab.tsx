@@ -5,10 +5,12 @@ import { DataTable } from '../components/data-table'
 import { MonacoSqlEditor } from '../components/monaco-sql-editor'
 import { Button, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
 import { useExecutionEngine } from '../engine/engine-context'
+import { saveNotebookChartHandoff } from '../lib/chart-handoff'
 import { api } from '../lib/api'
 import { cn, formatDate } from '../lib/utils'
 import { useTheme } from '../theme/theme-context'
 import type { DeltaTable, ExecutionEngine, NotebookCell, NotebookCellRunResult, NotebookDocument, UploadedFile } from '../types'
+import { useNavigate } from 'react-router-dom'
 
 function capabilityPill(enabled: boolean, label: string, theme: 'light' | 'dark') {
   return (
@@ -81,6 +83,7 @@ function buildDefaultNotebook(engine: ExecutionEngine | null): NotebookDocument 
 }
 
 export function EngineLabPage() {
+  const navigate = useNavigate()
   const { theme } = useTheme()
   const queryClient = useQueryClient()
   const { activeEngineId, setActiveEngineId } = useExecutionEngine()
@@ -274,6 +277,35 @@ export function EngineLabPage() {
 
   const insertHelperSnippet = (title: string, snippet: string) => {
     insertSnippetIntoNotebook(snippet, title)
+  }
+
+  const handoffCellResultToChartBuilder = (cell: NotebookCell, result: NotebookCellRunResult) => {
+    if (!result.rows.length || !result.columns.length) {
+      setRunError('This cell does not have tabular output yet, so there is nothing to hand off to Chart Builder.')
+      return
+    }
+    const cellIndex = activeNotebook?.cells_json.findIndex((item) => item.id === cell.id) ?? -1
+    const fallbackCellTitle = cellIndex >= 0 ? `Cell ${cellIndex + 1}` : 'Notebook Cell'
+    const numericColumn = result.columns.find((column) =>
+      result.rows.some((row) => {
+        const value = row[column]
+        return typeof value === 'number' || (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)))
+      }),
+    )
+    const categoryColumn = result.columns.find((column) => column !== numericColumn) ?? result.columns[0]
+    saveNotebookChartHandoff({
+      source: 'notebook',
+      notebookName: activeNotebook?.name ?? 'Notebook',
+      cellId: cell.id,
+      cellTitle: cell.title,
+      chartName: `${cell.title || fallbackCellTitle} Chart`,
+      chartType: 'bar',
+      categoryKey: categoryColumn,
+      valueKey: numericColumn ?? result.columns[0],
+      columns: result.columns,
+      rows: result.rows,
+    })
+    navigate('/bi/charts/new?source=notebook')
   }
 
   const handleRunNotebook = async () => {
@@ -901,6 +933,15 @@ export function EngineLabPage() {
                           {result.row_count} rows · {result.execution_ms} ms
                         </h4>
                         {result.message ? <p className="mt-2 max-w-3xl text-sm text-slate/75">{result.message}</p> : null}
+                      </div>
+                      <div className="flex flex-wrap gap-3">
+                        <Button
+                          tone="ghost"
+                          onClick={() => handoffCellResultToChartBuilder(cell, result)}
+                          disabled={!result.rows.length}
+                        >
+                          Open in Chart Builder
+                        </Button>
                       </div>
                     </div>
 
