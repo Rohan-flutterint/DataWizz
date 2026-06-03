@@ -2,6 +2,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/auth-context'
+import { BrandLogo } from '../components/brand-logo'
 import { Input, Panel } from '../components/ui'
 
 export function LoginPage() {
@@ -10,17 +11,14 @@ export function LoginPage() {
   const location = useLocation()
   const [email, setEmail] = useState('admin@datawizz.local')
   const [password, setPassword] = useState('datawizz123')
-  const [statusMessage, setStatusMessage] = useState('Use the demo credentials below to enter the internal workspace.')
 
   const from = (location.state as { from?: string } | undefined)?.from || '/'
 
   const loginMutation = useMutation({
     mutationFn: login,
-    onSuccess: (session) => {
-      setStatusMessage(`Signed in as ${session.user.name}. Redirecting to the workspace...`)
+    onSuccess: () => {
       navigate(from, { replace: true })
     },
-    onError: (error: Error) => setStatusMessage(error.message),
   })
 
   if (isAuthenticated) {
@@ -40,17 +38,17 @@ export function LoginPage() {
               <div>
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-white/60">
-                    Internal Lakehouse
+                    Lakehouse
                   </span>
                   <span className="rounded-full bg-[#f6f24a] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-black">
-                    Demo Edition
+                    Warehouse
                   </span>
                 </div>
 
                 <div className="mt-8 max-w-3xl">
                   <p className="text-sm font-medium uppercase tracking-[0.32em] text-white/45">DataWizz Workspace</p>
                   <h1 className="mt-5 font-display text-5xl leading-[0.95] text-white sm:text-6xl xl:text-7xl">
-                    The internal
+                    The
                     <br />
                     data operating
                     <br />
@@ -64,9 +62,6 @@ export function LoginPage() {
                 <div className="mt-8 flex flex-wrap gap-4">
                   <div className="rounded-2xl border border-[#f6f24a]/25 bg-[#f6f24a]/10 px-5 py-4 text-sm text-[#fbf8a1] shadow-[inset_0_0_0_1px_rgba(246,242,74,0.06)]">
                     Built for analytics engineering, ops, and BI teams
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm text-white/72">
-                    Local demo, Docker-ready, and presentable for internal stakeholders
                   </div>
                 </div>
               </div>
@@ -94,20 +89,19 @@ export function LoginPage() {
               <Panel className="w-full rounded-[36px] border border-white/10 bg-[#121212] p-8 text-white shadow-[0_28px_90px_rgba(0,0,0,0.45)] md:p-9">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-center gap-4">
-                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#111111] font-display text-2xl font-semibold text-[#f6f24a] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
-                      D
-                    </div>
+                    <BrandLogo
+                      className="h-14 w-14 rounded-2xl border border-white/10 bg-[#111111] p-2 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
+                      imageClassName="h-full w-full"
+                      variant="icon"
+                    />
                     <div>
                       <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-white/45">Workspace Access</p>
                       <p className="mt-2 font-display text-3xl leading-none text-white">Sign in to DataWizz</p>
                       <p className="mt-3 max-w-md text-sm leading-6 text-white/68">
-                        Enter the internal analytics workspace for lakehouse operations, orchestration, dashboards, and reporting.
+                        Enter the analytics workspace for lakehouse operations, orchestration, dashboards, and reporting.
                       </p>
                     </div>
                   </div>
-                  <span className="hidden rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-white/55 sm:inline-flex">
-                    Demo Auth
-                  </span>
                 </div>
 
                 <div className="mt-8 grid gap-4 rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
@@ -144,14 +138,11 @@ export function LoginPage() {
                 <div className="mt-6 rounded-[28px] border border-[#f6f24a]/20 bg-[#f6f24a]/10 p-5 text-sm text-white">
                   <div className="flex items-center justify-between gap-3">
                     <p className="font-semibold text-white">Access Status</p>
-                    <span className="rounded-full bg-black px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.26em] text-[#f6f24a]">
-                      Internal
-                    </span>
                   </div>
-                  <p className="mt-3 leading-6 text-white/74">{statusMessage}</p>
+                  <p className="mt-3 leading-6 text-white/74">Use the demo credentials below to enter the workspace.</p>
                 </div>
 
-                <div className="mt-6 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+                <div className="mt-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
                   <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5 text-sm text-white/72">
                     <p className="font-semibold text-white">Demo Credentials</p>
                     <p className="mt-3 leading-6">
@@ -171,15 +162,15 @@ export function LoginPage() {
                     <div className="mt-4 space-y-3">
                       <div className="flex items-center justify-between gap-4">
                         <span className="text-white/45">Execution Engine</span>
-                        <span className="font-semibold text-white">DuckDB + Delta</span>
+                        <span className="whitespace-nowrap text-right font-semibold text-white">DuckDB + Delta</span>
                       </div>
                       <div className="flex items-center justify-between gap-4">
                         <span className="text-white/45">Storage Model</span>
-                        <span className="font-semibold text-white">Raw / Curated zones</span>
+                        <span className="whitespace-nowrap text-right font-semibold text-white">Raw / Curated zones</span>
                       </div>
                       <div className="flex items-center justify-between gap-4">
                         <span className="text-white/45">Experience</span>
-                        <span className="font-semibold text-white">Low-code + SQL</span>
+                        <span className="whitespace-nowrap text-right font-semibold text-white">Low-code + SQL</span>
                       </div>
                     </div>
                   </div>

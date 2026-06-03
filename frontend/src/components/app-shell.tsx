@@ -3,6 +3,7 @@ import { Bell, Cpu, Database, LayoutDashboard, LineChart, LogOut, Logs, MoonStar
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/auth-context'
+import { BrandLogo } from './brand-logo'
 import { useExecutionEngine } from '../engine/engine-context'
 import { api } from '../lib/api'
 import { cn, formatDate } from '../lib/utils'
@@ -96,7 +97,7 @@ export function AppShell() {
         >
           <div className={cn('px-6 py-5', theme === 'dark' ? 'border-b border-white/10' : 'border-b border-slate-200')}>
             <div className="flex items-center gap-3">
-              <div className={cn('flex h-9 w-9 items-center justify-center rounded-md font-display text-lg font-semibold', theme === 'dark' ? 'bg-[#f6f24a] text-black' : 'bg-[#ff3621] text-white')}>D</div>
+              <BrandLogo className="h-11 w-11 shrink-0" imageClassName="h-10 w-10" variant="icon" />
               <div>
                 <p className={cn('font-display text-xl font-semibold', theme === 'dark' ? 'text-white' : 'text-slate-950')}>DataWizz</p>
                 <p className={cn('text-xs uppercase tracking-[0.18em]', theme === 'dark' ? 'text-white/45' : 'text-slate-500')}>Lakehouse Platform</p>
@@ -112,12 +113,8 @@ export function AppShell() {
               )}
             >
               <p className={cn('text-[11px] font-semibold uppercase tracking-[0.22em]', theme === 'dark' ? 'text-white/45' : 'text-slate-500')}>Workspace</p>
-              <p className={cn('mt-2 text-sm font-semibold', theme === 'dark' ? 'text-white' : 'text-slate-900')}>DataWizz Internal Demo</p>
-              <p className={cn('mt-1 text-sm leading-6', theme === 'dark' ? 'text-white/68' : 'text-slate-600')}>
-                {theme === 'dark'
-                  ? 'ClickHouse-inspired dark workspace for uploads, SQL, pipelines, and BI.'
-                  : 'Databricks-inspired workspace for uploads, SQL, pipelines, and BI.'}
-              </p>
+              <p className={cn('mt-2 text-sm font-semibold', theme === 'dark' ? 'text-white' : 'text-slate-900')}>DataWizz Demo</p>
+              <p className={cn('mt-1 text-sm leading-6', theme === 'dark' ? 'text-white/68' : 'text-slate-600')}>Workspace for uploads, SQL, pipelines, and BI.</p>
               <p className={cn('mt-2 text-xs font-semibold uppercase tracking-[0.2em]', theme === 'dark' ? 'text-[#f6f24a]' : 'text-[#c62e1a]')}>
                 Active engine: {activeEngineId}
               </p>
@@ -184,7 +181,7 @@ export function AppShell() {
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-4">
                 <div className="lg:hidden">
-                  <div className={cn('flex h-9 w-9 items-center justify-center rounded-md font-display text-lg font-semibold', theme === 'dark' ? 'bg-[#f6f24a] text-black' : 'bg-[#ff3621] text-white')}>D</div>
+                  <BrandLogo className="h-9 w-9 shrink-0" imageClassName="h-8 w-8" variant="icon" />
                 </div>
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/55">Workspace</p>
