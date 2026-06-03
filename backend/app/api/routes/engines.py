@@ -1,7 +1,12 @@
+from io import BytesIO
+
+import pyarrow.csv as pacsv
+import pyarrow.parquet as pq
 from sqlalchemy import desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.db.session import get_db
 from app.models.catalog import DeltaTable, UploadedFile
@@ -10,6 +15,9 @@ from app.schemas.common import ApiMessage
 from app.schemas.engines import EngineCatalogResponse, NotebookExecutionRequest, NotebookExecutionResponse
 from app.schemas.notebooks import (
     NotebookCellActionResponse,
+    NotebookCellExportRequest,
+    NotebookCellWriteDeltaRequest,
+    NotebookCellWriteDeltaResponse,
     NotebookDetailResponse,
     NotebookDocumentCreateRequest,
     NotebookDocumentRead,
@@ -17,10 +25,13 @@ from app.schemas.notebooks import (
     NotebookListResponse,
     NotebookRunExecutionResponse,
 )
+from app.services.delta_service import DeltaService
 from app.services.execution_engine_service import execution_engine_service
+from app.utils.naming import slugify_identifier
 
 
 router = APIRouter(prefix="/engines", tags=["engines"])
+delta_service = DeltaService()
 
 
 @router.get("", response_model=EngineCatalogResponse)
@@ -218,6 +229,84 @@ def run_from_cell(notebook_id: str, cell_id: str, db: Session = Depends(get_db))
         mode="from_here",
         start_cell_id=cell_id,
     )
+
+
+@router.post("/notebooks/{notebook_id}/cells/{cell_id}/export")
+def export_notebook_cell(
+    notebook_id: str,
+    cell_id: str,
+    payload: NotebookCellExportRequest,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
+    if notebook is None:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    try:
+        materialized = execution_engine_service.materialize_saved_notebook_cell(
+            notebook,
+            db=db,
+            uploaded_files=db.query(UploadedFile).all(),
+            delta_tables=db.query(DeltaTable).all(),
+            cell_id=cell_id,
+        )
+        safe_name = slugify_identifier(payload.file_name or f"{notebook.name}_{materialized['cell'].get('title') or cell_id}")
+        arrow_table = materialized["arrow_table"]
+        if payload.format == "csv":
+            output = BytesIO()
+            pacsv.write_csv(arrow_table, output)
+            output.seek(0)
+            return StreamingResponse(
+                output,
+                media_type="text/csv",
+                headers={"Content-Disposition": f'attachment; filename="{safe_name}.csv"'},
+            )
+
+        output = BytesIO()
+        pq.write_table(arrow_table, output)
+        output.seek(0)
+        return StreamingResponse(
+            output,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{safe_name}.parquet"'},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/notebooks/{notebook_id}/cells/{cell_id}/write-delta", response_model=NotebookCellWriteDeltaResponse)
+def write_notebook_cell_to_delta(
+    notebook_id: str,
+    cell_id: str,
+    payload: NotebookCellWriteDeltaRequest,
+    db: Session = Depends(get_db),
+) -> NotebookCellWriteDeltaResponse:
+    notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
+    if notebook is None:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    try:
+        materialized = execution_engine_service.materialize_saved_notebook_cell(
+            notebook,
+            db=db,
+            uploaded_files=db.query(UploadedFile).all(),
+            delta_tables=db.query(DeltaTable).all(),
+            cell_id=cell_id,
+        )
+        table = delta_service.write_table(
+            db,
+            table_name=payload.table_name,
+            arrow_table=materialized["arrow_table"],
+            mode=payload.mode,
+            schema_name=payload.schema_name,
+            description=payload.description,
+            source_query=f"Notebook cell export from {notebook.name}::{materialized['cell'].get('title') or cell_id} via {notebook.engine_id}",
+        )
+        return NotebookCellWriteDeltaResponse(message="Notebook result written to Delta successfully", table=table)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/notebooks/execute", response_model=NotebookExecutionResponse)

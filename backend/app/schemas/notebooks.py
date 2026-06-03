@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.schemas.common import TimestampedModel
+from app.schemas.tables import DeltaTableRead
 
 
 class NotebookCell(BaseModel):
@@ -78,3 +79,20 @@ class NotebookCellActionResponse(BaseModel):
     cell_results: list[NotebookCellExecutionResult]
     mode: str
     start_cell_id: str
+
+
+class NotebookCellExportRequest(BaseModel):
+    format: str = Field(pattern="^(csv|parquet)$")
+    file_name: str | None = None
+
+
+class NotebookCellWriteDeltaRequest(BaseModel):
+    table_name: str = Field(min_length=1)
+    mode: str = Field(default="overwrite", pattern="^(overwrite|append)$")
+    schema_name: str = Field(default="analytics", min_length=1)
+    description: str | None = None
+
+
+class NotebookCellWriteDeltaResponse(BaseModel):
+    message: str
+    table: DeltaTableRead
