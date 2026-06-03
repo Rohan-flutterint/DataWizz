@@ -1,8 +1,8 @@
-# DataWizz
+<img width="1672" height="941" alt="DataWizz_Logo" src="https://github.com/user-attachments/assets/fface9bb-209a-4456-bfe9-ec5c390d1c90" />
 
 <div align="center">
 
-**An internal lakehouse, orchestration, and BI workspace for modern analytics teams.**
+**An lakehouse, orchestration, and BI workspace for modern analytics teams.**
 
 [![Workspace](https://img.shields.io/badge/workspace-available-7c3aed?style=flat-square)](http://localhost:5173)
 [![Backend](https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square)](./backend)
@@ -13,7 +13,7 @@
 
 </div>
 
-DataWizz is a demo-ready internal data platform inspired by Databricks, Snowflake, ClickHouse Cloud, Airflow, Superset, and Metabase. It combines file ingestion, SQL exploration, Delta Lake publishing, multi-engine notebooks, low-code orchestration, and business dashboards in one local-first workspace.
+DataWizz is a data platform inspired by Databricks, Snowflake, ClickHouse Cloud, Airflow, Superset, and Metabase. It combines file ingestion, SQL exploration, Delta Lake publishing, multi-engine notebooks, low-code orchestration, and business dashboards in one local-first workspace.
 
 The current version is intentionally built as a serious MVP rather than a toy demo:
 
@@ -78,7 +78,7 @@ The current version is intentionally built as a serious MVP rather than a toy de
 
 ## Why DataWizz
 
-DataWizz is designed for internal analytics engineering and platform demos where you want a believable lakehouse product surface without needing a full distributed stack on day one.
+DataWizz is designed for analytics engineering and platform demos where you want a believable lakehouse product surface without needing a full distributed stack on day one.
 
 It is especially useful when you want to demonstrate:
 
