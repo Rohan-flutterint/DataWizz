@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowRightLeft, ArrowUp, ChevronDown, ChevronUp, Clock3, Copy, Cpu, DatabaseZap, FileCode2, PencilLine, Play, Plus, SkipForward, Sparkles, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { type DragEvent, useEffect, useMemo, useState } from 'react'
 import { DataTable } from '../components/data-table'
 import { MonacoSqlEditor } from '../components/monaco-sql-editor'
 import { Button, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
@@ -106,6 +106,8 @@ export function EngineLabPage() {
   const [runError, setRunError] = useState<string | null>(null)
   const [cellActionState, setCellActionState] = useState<{ cellId: string; mode: 'single' | 'from_here' } | null>(null)
   const [assetTargetCellId, setAssetTargetCellId] = useState<string>('new')
+  const [draggingCellId, setDraggingCellId] = useState<string | null>(null)
+  const [dropTargetCellId, setDropTargetCellId] = useState<string | null>(null)
 
   const engineCatalogQuery = useQuery({ queryKey: ['execution-engines'], queryFn: api.listExecutionEngines })
   const notebooksQuery = useQuery({ queryKey: ['notebooks'], queryFn: api.listNotebooks })
@@ -486,6 +488,21 @@ export function EngineLabPage() {
     setRunError(null)
   }
 
+  const moveCellToTarget = (draggedCellId: string, targetCellId: string) => {
+    if (draggedCellId === targetCellId) return
+    updateNotebookCells((cells) => {
+      const fromIndex = cells.findIndex((cell) => cell.id === draggedCellId)
+      const targetIndex = cells.findIndex((cell) => cell.id === targetCellId)
+      if (fromIndex === -1 || targetIndex === -1) return cells
+      const next = [...cells]
+      const [draggedCell] = next.splice(fromIndex, 1)
+      next.splice(targetIndex, 0, draggedCell)
+      return next
+    })
+    setRunFeedback('Reordered notebook cells.')
+    setRunError(null)
+  }
+
   const duplicateCell = (cell: NotebookCell, index: number) => {
     const duplicatedCell = createCell(cell.code, cell.title?.trim() ? `${cell.title} Copy` : `Cell ${index + 2}`)
     updateNotebookCells((cells) => {
@@ -519,6 +536,37 @@ export function EngineLabPage() {
       ...current,
       [cellId]: !current[cellId],
     }))
+  }
+
+  const handleCellDragStart = (event: DragEvent<HTMLElement>, cellId: string) => {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', cellId)
+    setDraggingCellId(cellId)
+    setDropTargetCellId(cellId)
+  }
+
+  const handleCellDragOver = (event: DragEvent<HTMLElement>, cellId: string) => {
+    event.preventDefault()
+    if (!draggingCellId || draggingCellId === cellId) return
+    event.dataTransfer.dropEffect = 'move'
+    if (dropTargetCellId !== cellId) {
+      setDropTargetCellId(cellId)
+    }
+  }
+
+  const handleCellDrop = (event: DragEvent<HTMLElement>, targetCellId: string) => {
+    event.preventDefault()
+    const draggedCellId = draggingCellId || event.dataTransfer.getData('text/plain')
+    if (draggedCellId) {
+      moveCellToTarget(draggedCellId, targetCellId)
+    }
+    setDraggingCellId(null)
+    setDropTargetCellId(null)
+  }
+
+  const handleCellDragEnd = () => {
+    setDraggingCellId(null)
+    setDropTargetCellId(null)
   }
 
   return (
@@ -1049,7 +1097,24 @@ export function EngineLabPage() {
             const result = cellResults[cell.id]
             const outputCollapsed = collapsedOutputs[cell.id] ?? false
             return (
-              <Panel key={cell.id} className="space-y-4 p-0">
+              <Panel
+                key={cell.id}
+                className={cn(
+                  'space-y-4 p-0 transition',
+                  draggingCellId === cell.id
+                    ? theme === 'dark'
+                      ? 'opacity-70 ring-1 ring-[#f6f24a]/25'
+                      : 'opacity-80 ring-1 ring-cyan-200'
+                    : '',
+                  dropTargetCellId === cell.id && draggingCellId !== cell.id
+                    ? theme === 'dark'
+                      ? 'ring-2 ring-[#f6f24a]/45'
+                      : 'ring-2 ring-lagoon/30'
+                    : '',
+                )}
+                onDragOver={(event) => handleCellDragOver(event, cell.id)}
+                onDrop={(event) => handleCellDrop(event, cell.id)}
+              >
                 <div className={cn('flex items-center justify-between border-b px-5 py-4', theme === 'dark' ? 'border-white/10' : 'border-slate-100')}>
                   <div className="flex-1">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Cell {index + 1}</p>
@@ -1070,6 +1135,16 @@ export function EngineLabPage() {
                     />
                   </div>
                   <div className="ml-4 flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      draggable
+                      onDragStart={(event) => handleCellDragStart(event, cell.id)}
+                      onDragEnd={handleCellDragEnd}
+                      className={cn('cursor-grab rounded-lg p-2 transition active:cursor-grabbing', theme === 'dark' ? 'text-white/55 hover:bg-white/5 hover:text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900')}
+                      title="Drag to reorder cell"
+                    >
+                      <ArrowRightLeft className="h-4 w-4" />
+                    </button>
                     {result ? (
                       <span className={cn('rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]', result.status === 'success' ? (theme === 'dark' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-700') : theme === 'dark' ? 'bg-rose-500/15 text-rose-300' : 'bg-rose-100 text-rose-700')}>
                         {result.status}
