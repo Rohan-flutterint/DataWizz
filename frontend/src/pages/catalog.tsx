@@ -36,6 +36,11 @@ export function CatalogPage() {
     queryFn: () => api.previewTable(selectedTableId!),
     enabled: Boolean(selectedTableId),
   })
+  const lineageQuery = useQuery({
+    queryKey: ['tables', selectedTableId, 'lineage'],
+    queryFn: () => api.getTableLineage(selectedTableId!),
+    enabled: Boolean(selectedTableId),
+  })
   const updateMetadataMutation = useMutation({
     mutationFn: async (payload: { tableId: string; owner?: string; tags?: string[]; lineage_hint?: string }) =>
       api.updateTableMetadata(payload.tableId, { owner: payload.owner, tags: payload.tags, lineage_hint: payload.lineage_hint }),
@@ -371,6 +376,162 @@ export function CatalogPage() {
                   </Panel>
 
                   <div className="space-y-4">
+                    <Panel className="space-y-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Catalog Lineage</p>
+                          <h3 className="mt-2 font-display text-2xl text-ink">Upstream and Downstream Relationships</h3>
+                        </div>
+                        <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-lagoon">
+                          {lineageQuery.data?.counts.semantic_datasets ?? 0} datasets · {lineageQuery.data?.counts.dashboards ?? 0} dashboards
+                        </span>
+                      </div>
+
+                      {lineageQuery.data ? (
+                        <div className="space-y-4">
+                          <div className="rounded-2xl bg-slate-50 p-4">
+                            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Upstream Creator</p>
+                            <p className="mt-2 text-sm font-semibold text-ink">{lineageQuery.data.upstream.label}</p>
+                            {lineageQuery.data.upstream.pipeline_name ? (
+                              <p className="mt-2 text-sm text-slate/70">
+                                Pipeline {lineageQuery.data.upstream.pipeline_name}
+                                {lineageQuery.data.upstream.node_id ? ` · ${lineageQuery.data.upstream.node_id}` : ''}
+                              </p>
+                            ) : null}
+                            {lineageQuery.data.upstream.notebook_name ? (
+                              <p className="mt-2 text-sm text-slate/70">
+                                Notebook {lineageQuery.data.upstream.notebook_name}
+                                {lineageQuery.data.upstream.cell_title ? ` · ${lineageQuery.data.upstream.cell_title}` : ''}
+                              </p>
+                            ) : null}
+                            {lineageQuery.data.upstream.source_query ? (
+                              <pre className="mt-3 overflow-x-auto rounded-2xl bg-white p-3 text-xs leading-6 text-slate-700">
+                                {lineageQuery.data.upstream.source_query}
+                              </pre>
+                            ) : null}
+                          </div>
+
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Related Pipelines</p>
+                              <div className="mt-3 space-y-3">
+                                {lineageQuery.data.related_pipelines.length ? (
+                                  lineageQuery.data.related_pipelines.map((pipeline) => (
+                                    <div key={pipeline.pipeline_id} className="rounded-2xl bg-white p-3">
+                                      <p className="font-semibold text-ink">{pipeline.pipeline_name}</p>
+                                      <p className="mt-1 text-sm text-slate/70">
+                                        {pipeline.node_id || 'writeDelta node'}
+                                        {pipeline.schedule_cron ? ` · ${pipeline.schedule_cron}` : ''}
+                                      </p>
+                                      <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate/50">{formatDate(pipeline.updated_at)}</p>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <p className="text-sm text-slate/70">No pipeline definitions currently target this table.</p>
+                                )}
+                              </div>
+                            </div>
+                            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Notebook Publishes</p>
+                              <div className="mt-3 space-y-3">
+                                {lineageQuery.data.notebook_artifacts.length ? (
+                                  lineageQuery.data.notebook_artifacts.map((artifact) => (
+                                    <div key={artifact.artifact_id} className="rounded-2xl bg-white p-3">
+                                      <p className="font-semibold text-ink">{artifact.display_name}</p>
+                                      <p className="mt-1 text-sm text-slate/70">
+                                        {artifact.cell_title || artifact.cell_id} · {artifact.row_count ?? 0} rows
+                                      </p>
+                                      <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate/50">{formatDate(artifact.created_at)}</p>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <p className="text-sm text-slate/70">No notebook publish artifacts are recorded for this table yet.</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                            <div className="rounded-2xl bg-cyan-50 p-4 text-lagoon">
+                              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-lagoon/70">Semantic Datasets</p>
+                              <p className="mt-2 font-display text-2xl">{lineageQuery.data.counts.semantic_datasets}</p>
+                            </div>
+                            <div className="rounded-2xl bg-emerald-50 p-4 text-emerald-700">
+                              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700/70">Charts</p>
+                              <p className="mt-2 font-display text-2xl">{lineageQuery.data.counts.charts}</p>
+                            </div>
+                            <div className="rounded-2xl bg-violet-50 p-4 text-violet-700">
+                              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-violet-700/70">Dashboards</p>
+                              <p className="mt-2 font-display text-2xl">{lineageQuery.data.counts.dashboards}</p>
+                            </div>
+                            <div className="rounded-2xl bg-amber-50 p-4 text-amber-700">
+                              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-700/70">Report Schedules</p>
+                              <p className="mt-2 font-display text-2xl">{lineageQuery.data.counts.report_schedules}</p>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-4 md:grid-cols-3">
+                            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Semantic Datasets</p>
+                              <div className="mt-3 space-y-3">
+                                {lineageQuery.data.semantic_datasets.length ? (
+                                  lineageQuery.data.semantic_datasets.map((dataset) => (
+                                    <div key={dataset.dataset_id} className="rounded-2xl bg-white p-3">
+                                      <p className="font-semibold text-ink">{dataset.dataset_name}</p>
+                                      <p className="mt-1 text-sm text-slate/70">{dataset.metrics_count} metrics · {dataset.dimensions_count} dimensions</p>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <p className="text-sm text-slate/70">No semantic datasets are registered from this table yet.</p>
+                                )}
+                              </div>
+                            </div>
+                            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Charts</p>
+                              <div className="mt-3 space-y-3">
+                                {lineageQuery.data.charts.length ? (
+                                  lineageQuery.data.charts.map((chart) => (
+                                    <div key={chart.chart_id} className="rounded-2xl bg-white p-3">
+                                      <p className="font-semibold text-ink">{chart.chart_name}</p>
+                                      <p className="mt-1 text-sm text-slate/70">{chart.chart_type}</p>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <p className="text-sm text-slate/70">No charts currently depend on this table.</p>
+                                )}
+                              </div>
+                            </div>
+                            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Dashboards and Reports</p>
+                              <div className="mt-3 space-y-3">
+                                {lineageQuery.data.dashboards.length ? (
+                                  lineageQuery.data.dashboards.map((dashboard) => (
+                                    <div key={dashboard.dashboard_id} className="rounded-2xl bg-white p-3">
+                                      <p className="font-semibold text-ink">{dashboard.dashboard_name}</p>
+                                      <p className="mt-1 text-sm text-slate/70">{dashboard.dashboard_description || 'No dashboard description yet.'}</p>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <p className="text-sm text-slate/70">No dashboards currently consume this table.</p>
+                                )}
+                                {lineageQuery.data.report_schedules.length ? (
+                                  <div className="space-y-2 pt-2">
+                                    {lineageQuery.data.report_schedules.map((schedule) => (
+                                      <div key={schedule.schedule_id} className="rounded-2xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                                        {schedule.schedule_name} · {schedule.frequency}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate/70">Lineage relationships will appear here after the selected table is resolved.</p>
+                      )}
+                    </Panel>
+
                     <Panel className="space-y-4">
                       <div className="flex items-start justify-between gap-4">
                         <div>

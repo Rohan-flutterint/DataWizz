@@ -30,6 +30,80 @@ export type DeltaTable = {
   updated_at: string
 }
 
+export type TableLineage = {
+  table_id: string
+  table_name: string
+  schema_name: string
+  upstream: {
+    kind: string
+    label: string
+    pipeline_id?: string | null
+    pipeline_name?: string | null
+    node_id?: string | null
+    schedule_cron?: string | null
+    notebook_id?: string | null
+    notebook_name?: string | null
+    cell_id?: string | null
+    cell_title?: string | null
+    artifact_id?: string | null
+    engine_id?: string | null
+    source_query?: string | null
+  }
+  related_pipelines: {
+    pipeline_id: string
+    pipeline_name: string
+    node_id?: string | null
+    schedule_cron?: string | null
+    updated_at: string
+  }[]
+  notebook_artifacts: {
+    artifact_id: string
+    notebook_id: string
+    cell_id: string
+    cell_title?: string | null
+    artifact_kind: string
+    display_name: string
+    row_count?: number | null
+    created_at: string
+  }[]
+  semantic_datasets: {
+    dataset_id: string
+    dataset_name: string
+    metrics_count: number
+    dimensions_count: number
+    updated_at: string
+  }[]
+  charts: {
+    chart_id: string
+    chart_name: string
+    chart_type: string
+    dataset_id?: string | null
+    updated_at: string
+  }[]
+  dashboards: {
+    dashboard_id: string
+    dashboard_name: string
+    dashboard_description?: string | null
+    updated_at: string
+  }[]
+  report_schedules: {
+    schedule_id: string
+    schedule_name: string
+    dashboard_id?: string | null
+    frequency: string
+    destination: string
+    updated_at: string
+  }[]
+  counts: {
+    semantic_datasets: number
+    charts: number
+    dashboards: number
+    report_schedules: number
+    related_pipelines: number
+    notebook_artifacts: number
+  }
+}
+
 export type QueryHistory = {
   id: string
   name?: string
