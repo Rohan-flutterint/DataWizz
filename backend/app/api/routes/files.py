@@ -59,7 +59,13 @@ def preview_file(file_id: str, db: Session = Depends(get_db)) -> FilePreviewResp
     record.row_count = preview["row_count"]
     db.commit()
     db.refresh(record)
-    return FilePreviewResponse(file=record, columns=preview["columns"], rows=preview["rows"])
+    return FilePreviewResponse(
+        file=record,
+        columns=preview["columns"],
+        rows=preview["rows"],
+        profile_summary=preview["profile_summary"],
+        column_profiles=preview["column_profiles"],
+    )
 
 
 @router.delete("/{file_id}", response_model=FileDeleteResponse, dependencies=[Depends(require_roles("admin", "analyst"))])

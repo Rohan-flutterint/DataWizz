@@ -6,12 +6,38 @@ import { DataTable } from '../components/data-table'
 import { StatusBadge } from '../components/status-badge'
 import { Button, EmptyState, PageHeader, Panel } from '../components/ui'
 import { api } from '../lib/api'
-import { formatBytes, formatDate } from '../lib/utils'
-import type { UploadedFile } from '../types'
+import { formatBytes, formatDate, formatNumber } from '../lib/utils'
+import { useTheme } from '../theme/theme-context'
+import type { FileColumnProfile, UploadedFile } from '../types'
+
+function signalTone(signal: string) {
+  const normalized = signal.toLowerCase()
+  if (normalized.includes('no missing') || normalized.includes('complete')) return 'bg-emerald-50 text-emerald-700'
+  if (normalized.includes('blank') || normalized.includes('missing')) return 'bg-amber-50 text-amber-700'
+  if (normalized.includes('constant') || normalized.includes('high-cardinality') || normalized.includes('empty')) return 'bg-rose-50 text-rose-700'
+  return 'bg-slate-100 text-slate-700'
+}
+
+function profileValue(profile: FileColumnProfile) {
+  if (profile.profile_kind === 'numeric') {
+    return `Min ${profile.min_value ?? 'N/A'} · Max ${profile.max_value ?? 'N/A'}`
+  }
+  if (profile.profile_kind === 'temporal') {
+    return `Range ${profile.min_value ?? 'N/A'} → ${profile.max_value ?? 'N/A'}`
+  }
+  if (profile.profile_kind === 'boolean') {
+    return `True ${profile.true_count ?? 0} · False ${profile.false_count ?? 0}`
+  }
+  if (profile.sample_values.length) {
+    return profile.sample_values.join(' · ')
+  }
+  return 'No representative values'
+}
 
 export function FileExplorerPage() {
   const { hasAnyRole } = useAuth()
   const canEdit = hasAnyRole('admin', 'analyst')
+  const { theme } = useTheme()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
@@ -189,13 +215,19 @@ export function FileExplorerPage() {
                   type="button"
                   onClick={() => setSelectedFileId(file.id)}
                   className={`w-full rounded-2xl border p-4 text-left transition ${
-                    selectedFileId === file.id ? 'border-lagoon bg-cyan-50/80' : 'border-slate-100 bg-slate-50/80 hover:border-slate-200'
+                    selectedFileId === file.id
+                      ? theme === 'dark'
+                        ? 'border-[#f6f24a]/50 bg-[#f6f24a]/14 shadow-[0_0_0_1px_rgba(246,242,74,0.08)]'
+                        : 'border-lagoon bg-cyan-50/80'
+                      : theme === 'dark'
+                        ? 'border-white/10 bg-white/[0.03] hover:border-white/20'
+                        : 'border-slate-100 bg-slate-50/80 hover:border-slate-200'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="font-semibold text-ink">{file.name}</p>
-                      <p className="mt-1 text-sm text-slate/70">
+                      <p className={`mt-1 text-sm ${theme === 'dark' && selectedFileId === file.id ? 'text-white/78' : 'text-slate/70'}`}>
                         {file.file_type.toUpperCase()} • {formatBytes(file.size_bytes)} • {file.row_count ?? 'Unknown'} rows
                       </p>
                     </div>
@@ -212,7 +244,9 @@ export function FileExplorerPage() {
                       </Button>
                     ) : null}
                   </div>
-                  <p className="mt-3 text-xs uppercase tracking-[0.24em] text-slate/50">{formatDate(file.created_at)}</p>
+                  <p className={`mt-3 text-xs uppercase tracking-[0.24em] ${theme === 'dark' && selectedFileId === file.id ? 'text-white/55' : 'text-slate/50'}`}>
+                    {formatDate(file.created_at)}
+                  </p>
                 </button>
               ))
             ) : (
@@ -224,24 +258,118 @@ export function FileExplorerPage() {
         <div className="space-y-5">
           <Panel>
             <h2 className="font-display text-2xl text-ink">File Preview</h2>
-            {previewQuery.data ? (
+            {previewQuery.isLoading && selectedFileId ? (
+              <p className="mt-4 text-sm text-slate/70">Loading file preview and profile...</p>
+            ) : previewQuery.error ? (
+              <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {(previewQuery.error as Error).message}
+              </div>
+            ) : previewQuery.data ? (
               <div className="mt-4 space-y-4">
+                <div className="grid gap-3 xl:grid-cols-4">
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Rows</p>
+                    <p className="mt-2 font-display text-2xl text-ink">{formatNumber(previewQuery.data.profile_summary.total_rows)}</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Columns</p>
+                    <p className="mt-2 font-display text-2xl text-ink">{formatNumber(previewQuery.data.profile_summary.total_columns)}</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Null Cells</p>
+                    <p className="mt-2 font-display text-2xl text-ink">{formatNumber(previewQuery.data.profile_summary.null_cells)}</p>
+                    <p className="mt-1 text-xs text-slate/65">
+                      {formatNumber(previewQuery.data.profile_summary.columns_with_nulls)} columns with missing values
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Quality Signals</p>
+                    <p className="mt-2 font-display text-2xl text-ink">{formatNumber(previewQuery.data.profile_summary.quality_indicators.length)}</p>
+                    <p className="mt-1 text-xs text-slate/65">
+                      {formatNumber(previewQuery.data.profile_summary.columns_with_blank_values)} columns with blank strings
+                    </p>
+                  </div>
+                </div>
+
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-2xl bg-slate-50 p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Storage Path</p>
                     <p className="mt-2 text-sm text-ink">{previewQuery.data.file.storage_path}</p>
                   </div>
-                  <div className="rounded-2xl bg-slate-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Schema</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {previewQuery.data.file.schema_json?.map((field) => (
-                        <span key={field.name} className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate">
-                          {field.name}: {field.type}
-                        </span>
-                      ))}
+                  <div className="rounded-2xl bg-cyan-50 p-4 text-lagoon">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-lagoon/70">Profile Status</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {previewQuery.data.profile_summary.quality_indicators.length ? (
+                        previewQuery.data.profile_summary.quality_indicators.map((signal) => (
+                          <span key={signal} className={`rounded-full px-3 py-1 text-xs font-semibold ${signalTone(signal)}`}>
+                            {signal}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-lagoon">Ready for profiling</span>
+                      )}
                     </div>
                   </div>
                 </div>
+
+                <Panel className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Column Profiling</p>
+                      <h3 className="mt-2 font-display text-2xl text-ink">Data quality and cardinality overview</h3>
+                    </div>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate/65">
+                      {previewQuery.data.column_profiles.length} fields
+                    </span>
+                  </div>
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    {previewQuery.data.column_profiles.map((profile) => (
+                      <div key={profile.name} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="break-words font-semibold text-ink">{profile.name}</p>
+                            <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate/55">{profile.type}</p>
+                          </div>
+                          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate">
+                            {formatNumber(profile.completeness_ratio, 1)}% complete
+                          </span>
+                        </div>
+                        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                          <div className="rounded-2xl bg-white px-3 py-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate/50">Nulls</p>
+                            <p className="mt-2 text-sm font-semibold text-ink">{formatNumber(profile.null_count)}</p>
+                          </div>
+                          <div className="rounded-2xl bg-white px-3 py-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate/50">Distinct</p>
+                            <p className="mt-2 text-sm font-semibold text-ink">{formatNumber(profile.distinct_count)}</p>
+                          </div>
+                          <div className="rounded-2xl bg-white px-3 py-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate/50">
+                              {profile.profile_kind === 'string' ? 'Blank strings' : 'Profile kind'}
+                            </p>
+                            <p className="mt-2 text-sm font-semibold text-ink">
+                              {profile.profile_kind === 'string' ? formatNumber(profile.blank_count) : profile.profile_kind}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-4">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate/50">Representative values</p>
+                          <p className="mt-2 text-sm leading-6 text-slate/75">{profileValue(profile)}</p>
+                          {profile.avg_value !== null && profile.avg_value !== undefined ? (
+                            <p className="mt-2 text-xs text-slate/60">Average: {formatNumber(profile.avg_value, 2)}</p>
+                          ) : null}
+                        </div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {profile.quality_indicators.map((signal) => (
+                            <span key={`${profile.name}-${signal}`} className={`rounded-full px-3 py-1 text-xs font-semibold ${signalTone(signal)}`}>
+                              {signal}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Panel>
                 <DataTable columns={previewQuery.data.columns} rows={previewQuery.data.rows} />
               </div>
             ) : (
