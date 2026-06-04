@@ -4,7 +4,9 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import require_roles
 from app.db.session import get_db
 from app.models.catalog import DeltaTable
+from app.schemas.table_lineage import TableLineageResponse
 from app.schemas.tables import DeltaTableListResponse, DeltaTableMetadataUpdateRequest, DeltaTablePreviewResponse, DeltaTableRead
+from app.services.catalog_lineage_service import catalog_lineage_service
 from app.services.catalog_metadata_service import CatalogMetadataService
 from app.services.delta_service import DeltaService
 from app.services.duckdb_service import DuckDBService
@@ -30,6 +32,14 @@ def preview_table(table_id: str, db: Session = Depends(get_db)) -> DeltaTablePre
     preview = duckdb_service.preview_delta(table)
     enriched = DeltaTableRead.model_validate(catalog_metadata_service.enrich_table(table))
     return DeltaTablePreviewResponse(table=enriched, columns=preview["columns"], rows=preview["rows"])
+
+
+@router.get("/{table_id}/lineage", response_model=TableLineageResponse)
+def get_table_lineage(table_id: str, db: Session = Depends(get_db)) -> TableLineageResponse:
+    table = db.query(DeltaTable).filter(DeltaTable.id == table_id).one_or_none()
+    if table is None:
+        raise HTTPException(status_code=404, detail="Delta table not found")
+    return TableLineageResponse.model_validate(catalog_lineage_service.build_table_lineage(db, table))
 
 
 @router.put("/{table_id}/metadata", response_model=DeltaTableRead, dependencies=[Depends(require_roles("admin", "analyst"))])
