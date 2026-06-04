@@ -11,6 +11,40 @@ export type UploadedFile = {
   updated_at: string
 }
 
+export type FileProfileSummary = {
+  total_rows: number
+  total_columns: number
+  null_cells: number
+  columns_with_nulls: number
+  columns_with_blank_values: number
+  quality_indicators: string[]
+}
+
+export type FileColumnProfile = {
+  name: string
+  type: string
+  profile_kind: 'numeric' | 'temporal' | 'boolean' | 'string' | 'other'
+  null_count: number
+  distinct_count: number
+  blank_count: number
+  completeness_ratio: number
+  sample_values: string[]
+  min_value?: string | null
+  max_value?: string | null
+  avg_value?: number | null
+  true_count?: number | null
+  false_count?: number | null
+  quality_indicators: string[]
+}
+
+export type FilePreview = {
+  file: UploadedFile
+  columns: string[]
+  rows: Record<string, unknown>[]
+  profile_summary: FileProfileSummary
+  column_profiles: FileColumnProfile[]
+}
+
 export type DeltaTable = {
   id: string
   name: string

@@ -24,6 +24,8 @@ class FilePreviewResponse(BaseModel):
     file: UploadedFileRead
     columns: list[str]
     rows: list[dict]
+    profile_summary: dict
+    column_profiles: list[dict]
 
 
 class FileListResponse(BaseModel):
