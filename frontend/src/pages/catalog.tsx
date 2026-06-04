@@ -15,6 +15,17 @@ function freshnessTone(status?: string) {
   return 'bg-slate-100 text-slate-700'
 }
 
+function lineageGraphTone(theme: 'light' | 'dark', active: boolean) {
+  if (theme === 'dark') {
+    return active
+      ? 'border-cyan-400/30 bg-cyan-400/10 text-white'
+      : 'border-white/10 bg-white/[0.03] text-white/55'
+  }
+  return active
+    ? 'border-cyan-200 bg-cyan-50 text-slate-900'
+    : 'border-slate-200 bg-slate-50 text-slate-500'
+}
+
 export function CatalogPage() {
   const { hasAnyRole } = useAuth()
   const canEdit = hasAnyRole('admin', 'analyst')
@@ -121,6 +132,7 @@ export function CatalogPage() {
   }, [filteredTables])
 
   const selectedTable = tables.find((table) => table.id === selectedTableId) ?? null
+  const selectedLineage = lineageQuery.data
   const freshTables = tables.filter((table) => table.freshness_status === 'fresh').length
   const latestRefresh = tables
     .map((table) => table.last_refreshed_at ?? table.updated_at)
@@ -135,6 +147,81 @@ export function CatalogPage() {
     setLineageDraft(selectedTable.lineage_hint ?? '')
     setStatusMessage(`Inspecting ${selectedTable.schema_name}.${selectedTable.name}.`)
   }, [selectedTableId, selectedTable])
+
+  const openPipeline = (pipelineId: string) => navigate(`/pipelines?pipelineId=${encodeURIComponent(pipelineId)}`)
+  const openDataset = (datasetId: string) => navigate(`/bi/datasets?datasetId=${encodeURIComponent(datasetId)}`)
+  const openChart = (chartId: string) => navigate(`/bi/charts?chartId=${encodeURIComponent(chartId)}`)
+  const openDashboard = (dashboardId: string) => navigate(`/bi/dashboards?dashboardId=${encodeURIComponent(dashboardId)}`)
+  const openReports = (dashboardId?: string | null) =>
+    navigate(dashboardId ? `/bi/reports?dashboardId=${encodeURIComponent(dashboardId)}` : '/bi/reports')
+
+  const lineageGraphNodes = selectedLineage
+    ? [
+        {
+          key: 'upstream',
+          label:
+            selectedLineage.upstream.kind === 'pipeline'
+              ? selectedLineage.upstream.pipeline_name || 'Pipeline'
+              : selectedLineage.upstream.kind === 'notebook'
+                ? selectedLineage.upstream.notebook_name || 'Notebook'
+                : selectedLineage.upstream.kind === 'sql'
+                  ? 'SQL Publish'
+                  : selectedLineage.upstream.label,
+          meta: selectedLineage.upstream.kind.replace(/_/g, ' '),
+          active: true,
+          onClick:
+            selectedLineage.upstream.pipeline_id
+              ? () => openPipeline(selectedLineage.upstream.pipeline_id as string)
+              : undefined,
+        },
+        {
+          key: 'table',
+          label: selectedTable ? `${selectedTable.schema_name}.${selectedTable.name}` : 'Delta Table',
+          meta: 'curated delta table',
+          active: true,
+        },
+        {
+          key: 'datasets',
+          label: `${selectedLineage.counts.semantic_datasets} dataset${selectedLineage.counts.semantic_datasets === 1 ? '' : 's'}`,
+          meta: 'semantic layer',
+          active: selectedLineage.counts.semantic_datasets > 0,
+          onClick:
+            selectedLineage.semantic_datasets[0]
+              ? () => openDataset(selectedLineage.semantic_datasets[0].dataset_id)
+              : undefined,
+        },
+        {
+          key: 'charts',
+          label: `${selectedLineage.counts.charts} chart${selectedLineage.counts.charts === 1 ? '' : 's'}`,
+          meta: 'bi charts',
+          active: selectedLineage.counts.charts > 0,
+          onClick:
+            selectedLineage.charts[0]
+              ? () => openChart(selectedLineage.charts[0].chart_id)
+              : undefined,
+        },
+        {
+          key: 'dashboards',
+          label: `${selectedLineage.counts.dashboards} dashboard${selectedLineage.counts.dashboards === 1 ? '' : 's'}`,
+          meta: 'dashboards',
+          active: selectedLineage.counts.dashboards > 0,
+          onClick:
+            selectedLineage.dashboards[0]
+              ? () => openDashboard(selectedLineage.dashboards[0].dashboard_id)
+              : undefined,
+        },
+        {
+          key: 'reports',
+          label: `${selectedLineage.counts.report_schedules} report${selectedLineage.counts.report_schedules === 1 ? '' : 's'}`,
+          meta: 'scheduled exports',
+          active: selectedLineage.counts.report_schedules > 0,
+          onClick:
+            selectedLineage.report_schedules[0]
+              ? () => openReports(selectedLineage.report_schedules[0].dashboard_id)
+              : undefined,
+        },
+      ]
+    : []
 
   return (
     <div className="space-y-6">
@@ -387,8 +474,41 @@ export function CatalogPage() {
                         </span>
                       </div>
 
-                      {lineageQuery.data ? (
+                      {selectedLineage ? (
                         <div className="space-y-4">
+                          <div
+                            className={`overflow-x-auto rounded-2xl border p-4 ${
+                              theme === 'dark' ? 'border-white/10 bg-white/[0.03]' : 'border-slate-100 bg-slate-50/80'
+                            }`}
+                          >
+                            <div className="flex min-w-max items-center gap-3">
+                              {lineageGraphNodes.map((node, index) => (
+                                <div key={node.key} className="flex items-center gap-3">
+                                  {node.onClick ? (
+                                    <button
+                                      type="button"
+                                      onClick={node.onClick}
+                                      className={`rounded-2xl border px-4 py-3 text-left transition hover:-translate-y-0.5 ${
+                                        lineageGraphTone(theme, node.active)
+                                      }`}
+                                    >
+                                      <p className="max-w-[190px] break-words text-sm font-semibold">{node.label}</p>
+                                      <p className={`mt-1 text-[11px] uppercase tracking-[0.18em] ${theme === 'dark' ? 'text-white/55' : 'text-slate/55'}`}>{node.meta}</p>
+                                    </button>
+                                  ) : (
+                                    <div className={`rounded-2xl border px-4 py-3 ${lineageGraphTone(theme, node.active)}`}>
+                                      <p className="max-w-[190px] break-words text-sm font-semibold">{node.label}</p>
+                                      <p className={`mt-1 text-[11px] uppercase tracking-[0.18em] ${theme === 'dark' ? 'text-white/55' : 'text-slate/55'}`}>{node.meta}</p>
+                                    </div>
+                                  )}
+                                  {index < lineageGraphNodes.length - 1 ? (
+                                    <span className={`text-lg font-semibold ${theme === 'dark' ? 'text-white/35' : 'text-slate/35'}`}>→</span>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
                           <div className="rounded-2xl bg-slate-50 p-4">
                             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Upstream Creator</p>
                             <p className="mt-2 text-sm font-semibold text-ink">{lineageQuery.data.upstream.label}</p>
@@ -397,6 +517,15 @@ export function CatalogPage() {
                                 Pipeline {lineageQuery.data.upstream.pipeline_name}
                                 {lineageQuery.data.upstream.node_id ? ` · ${lineageQuery.data.upstream.node_id}` : ''}
                               </p>
+                            ) : null}
+                            {lineageQuery.data.upstream.pipeline_id ? (
+                              <button
+                                type="button"
+                                onClick={() => openPipeline(lineageQuery.data.upstream.pipeline_id as string)}
+                                className="mt-3 text-sm font-semibold text-lagoon underline-offset-4 hover:underline"
+                              >
+                                Open Pipeline
+                              </button>
                             ) : null}
                             {lineageQuery.data.upstream.notebook_name ? (
                               <p className="mt-2 text-sm text-slate/70">
@@ -417,14 +546,19 @@ export function CatalogPage() {
                               <div className="mt-3 space-y-3">
                                 {lineageQuery.data.related_pipelines.length ? (
                                   lineageQuery.data.related_pipelines.map((pipeline) => (
-                                    <div key={pipeline.pipeline_id} className="rounded-2xl bg-white p-3">
-                                      <p className="font-semibold text-ink">{pipeline.pipeline_name}</p>
-                                      <p className="mt-1 text-sm text-slate/70">
+                                    <button
+                                      key={pipeline.pipeline_id}
+                                      type="button"
+                                      onClick={() => openPipeline(pipeline.pipeline_id)}
+                                      className="w-full rounded-2xl bg-white p-3 text-left transition hover:-translate-y-0.5 hover:shadow-sm"
+                                    >
+                                      <p className="break-words font-semibold text-ink">{pipeline.pipeline_name}</p>
+                                      <p className="mt-1 break-words text-sm text-slate/70">
                                         {pipeline.node_id || 'writeDelta node'}
                                         {pipeline.schedule_cron ? ` · ${pipeline.schedule_cron}` : ''}
                                       </p>
                                       <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate/50">{formatDate(pipeline.updated_at)}</p>
-                                    </div>
+                                    </button>
                                   ))
                                 ) : (
                                   <p className="text-sm text-slate/70">No pipeline definitions currently target this table.</p>
@@ -437,8 +571,8 @@ export function CatalogPage() {
                                 {lineageQuery.data.notebook_artifacts.length ? (
                                   lineageQuery.data.notebook_artifacts.map((artifact) => (
                                     <div key={artifact.artifact_id} className="rounded-2xl bg-white p-3">
-                                      <p className="font-semibold text-ink">{artifact.display_name}</p>
-                                      <p className="mt-1 text-sm text-slate/70">
+                                      <p className="break-words font-semibold text-ink">{artifact.display_name}</p>
+                                      <p className="mt-1 break-words text-sm text-slate/70">
                                         {artifact.cell_title || artifact.cell_id} · {artifact.row_count ?? 0} rows
                                       </p>
                                       <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate/50">{formatDate(artifact.created_at)}</p>
@@ -452,22 +586,42 @@ export function CatalogPage() {
                           </div>
 
                           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                            <div className="rounded-2xl bg-cyan-50 p-4 text-lagoon">
+                            <button
+                              type="button"
+                              disabled={!lineageQuery.data.semantic_datasets[0]}
+                              onClick={() => lineageQuery.data.semantic_datasets[0] && openDataset(lineageQuery.data.semantic_datasets[0].dataset_id)}
+                              className="rounded-2xl bg-cyan-50 p-4 text-left text-lagoon transition disabled:cursor-default disabled:opacity-100"
+                            >
                               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-lagoon/70">Semantic Datasets</p>
                               <p className="mt-2 font-display text-2xl">{lineageQuery.data.counts.semantic_datasets}</p>
-                            </div>
-                            <div className="rounded-2xl bg-emerald-50 p-4 text-emerald-700">
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!lineageQuery.data.charts[0]}
+                              onClick={() => lineageQuery.data.charts[0] && openChart(lineageQuery.data.charts[0].chart_id)}
+                              className="rounded-2xl bg-emerald-50 p-4 text-left text-emerald-700 transition disabled:cursor-default disabled:opacity-100"
+                            >
                               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700/70">Charts</p>
                               <p className="mt-2 font-display text-2xl">{lineageQuery.data.counts.charts}</p>
-                            </div>
-                            <div className="rounded-2xl bg-violet-50 p-4 text-violet-700">
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!lineageQuery.data.dashboards[0]}
+                              onClick={() => lineageQuery.data.dashboards[0] && openDashboard(lineageQuery.data.dashboards[0].dashboard_id)}
+                              className="rounded-2xl bg-violet-50 p-4 text-left text-violet-700 transition disabled:cursor-default disabled:opacity-100"
+                            >
                               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-violet-700/70">Dashboards</p>
                               <p className="mt-2 font-display text-2xl">{lineageQuery.data.counts.dashboards}</p>
-                            </div>
-                            <div className="rounded-2xl bg-amber-50 p-4 text-amber-700">
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!lineageQuery.data.report_schedules[0]}
+                              onClick={() => lineageQuery.data.report_schedules[0] && openReports(lineageQuery.data.report_schedules[0].dashboard_id)}
+                              className="rounded-2xl bg-amber-50 p-4 text-left text-amber-700 transition disabled:cursor-default disabled:opacity-100"
+                            >
                               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-700/70">Report Schedules</p>
                               <p className="mt-2 font-display text-2xl">{lineageQuery.data.counts.report_schedules}</p>
-                            </div>
+                            </button>
                           </div>
 
                           <div className="grid gap-4 md:grid-cols-3">
@@ -476,10 +630,15 @@ export function CatalogPage() {
                               <div className="mt-3 space-y-3">
                                 {lineageQuery.data.semantic_datasets.length ? (
                                   lineageQuery.data.semantic_datasets.map((dataset) => (
-                                    <div key={dataset.dataset_id} className="rounded-2xl bg-white p-3">
-                                      <p className="font-semibold text-ink">{dataset.dataset_name}</p>
+                                    <button
+                                      key={dataset.dataset_id}
+                                      type="button"
+                                      onClick={() => openDataset(dataset.dataset_id)}
+                                      className="w-full rounded-2xl bg-white p-3 text-left transition hover:-translate-y-0.5 hover:shadow-sm"
+                                    >
+                                      <p className="break-words font-semibold text-ink">{dataset.dataset_name}</p>
                                       <p className="mt-1 text-sm text-slate/70">{dataset.metrics_count} metrics · {dataset.dimensions_count} dimensions</p>
-                                    </div>
+                                    </button>
                                   ))
                                 ) : (
                                   <p className="text-sm text-slate/70">No semantic datasets are registered from this table yet.</p>
@@ -491,10 +650,15 @@ export function CatalogPage() {
                               <div className="mt-3 space-y-3">
                                 {lineageQuery.data.charts.length ? (
                                   lineageQuery.data.charts.map((chart) => (
-                                    <div key={chart.chart_id} className="rounded-2xl bg-white p-3">
-                                      <p className="font-semibold text-ink">{chart.chart_name}</p>
+                                    <button
+                                      key={chart.chart_id}
+                                      type="button"
+                                      onClick={() => openChart(chart.chart_id)}
+                                      className="w-full rounded-2xl bg-white p-3 text-left transition hover:-translate-y-0.5 hover:shadow-sm"
+                                    >
+                                      <p className="break-words font-semibold text-ink">{chart.chart_name}</p>
                                       <p className="mt-1 text-sm text-slate/70">{chart.chart_type}</p>
-                                    </div>
+                                    </button>
                                   ))
                                 ) : (
                                   <p className="text-sm text-slate/70">No charts currently depend on this table.</p>
@@ -506,10 +670,15 @@ export function CatalogPage() {
                               <div className="mt-3 space-y-3">
                                 {lineageQuery.data.dashboards.length ? (
                                   lineageQuery.data.dashboards.map((dashboard) => (
-                                    <div key={dashboard.dashboard_id} className="rounded-2xl bg-white p-3">
-                                      <p className="font-semibold text-ink">{dashboard.dashboard_name}</p>
+                                    <button
+                                      key={dashboard.dashboard_id}
+                                      type="button"
+                                      onClick={() => openDashboard(dashboard.dashboard_id)}
+                                      className="w-full rounded-2xl bg-white p-3 text-left transition hover:-translate-y-0.5 hover:shadow-sm"
+                                    >
+                                      <p className="break-words font-semibold text-ink">{dashboard.dashboard_name}</p>
                                       <p className="mt-1 text-sm text-slate/70">{dashboard.dashboard_description || 'No dashboard description yet.'}</p>
-                                    </div>
+                                    </button>
                                   ))
                                 ) : (
                                   <p className="text-sm text-slate/70">No dashboards currently consume this table.</p>
@@ -517,9 +686,14 @@ export function CatalogPage() {
                                 {lineageQuery.data.report_schedules.length ? (
                                   <div className="space-y-2 pt-2">
                                     {lineageQuery.data.report_schedules.map((schedule) => (
-                                      <div key={schedule.schedule_id} className="rounded-2xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                                      <button
+                                        key={schedule.schedule_id}
+                                        type="button"
+                                        onClick={() => openReports(schedule.dashboard_id)}
+                                        className="w-full rounded-2xl bg-amber-50 px-3 py-2 text-left text-sm text-amber-800 transition hover:-translate-y-0.5"
+                                      >
                                         {schedule.schedule_name} · {schedule.frequency}
-                                      </div>
+                                      </button>
                                     ))}
                                   </div>
                                 ) : null}

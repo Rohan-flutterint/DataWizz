@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { DataTable } from '../components/data-table'
 import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
 import { api } from '../lib/api'
@@ -32,6 +33,7 @@ function parseJsonArray(value: string, fallback: unknown[] = []) {
 
 export function DatasetsPage() {
   const queryClient = useQueryClient()
+  const [searchParams] = useSearchParams()
   const datasetsQuery = useQuery({ queryKey: ['bi', 'datasets'], queryFn: api.listDatasets })
   const [selection, setSelection] = useState<ExplorerSelection | null>(null)
   const [search, setSearch] = useState('')
@@ -69,6 +71,26 @@ export function DatasetsPage() {
   }, [datasets, search])
 
   useEffect(() => {
+    const requestedDatasetId = searchParams.get('datasetId')
+    if (requestedDatasetId && datasets.some((dataset) => dataset.id === requestedDatasetId)) {
+      setSelection((current) =>
+        current?.kind === 'dataset' && current.id === requestedDatasetId
+          ? current
+          : { kind: 'dataset', id: requestedDatasetId },
+      )
+      return
+    }
+
+    const requestedCandidateId = searchParams.get('candidateId')
+    if (requestedCandidateId && candidates.some((candidate) => candidate.id === requestedCandidateId)) {
+      setSelection((current) =>
+        current?.kind === 'candidate' && current.id === requestedCandidateId
+          ? current
+          : { kind: 'candidate', id: requestedCandidateId },
+      )
+      return
+    }
+
     if (selection) return
     if (filteredCandidates[0]) {
       setSelection({ kind: 'candidate', id: filteredCandidates[0].id })
@@ -77,7 +99,7 @@ export function DatasetsPage() {
     if (filteredDatasets[0]) {
       setSelection({ kind: 'dataset', id: filteredDatasets[0].id })
     }
-  }, [filteredCandidates, filteredDatasets, selection])
+  }, [candidates, datasets, filteredCandidates, filteredDatasets, searchParams, selection])
 
   const selectedCandidate = selection?.kind === 'candidate' ? candidates.find((candidate) => candidate.id === selection.id) ?? null : null
   const selectedDataset = selection?.kind === 'dataset' ? datasets.find((dataset) => dataset.id === selection.id) ?? null : null
