@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRightLeft, Clock3, Copy, Cpu, DatabaseZap, FileCode2, PencilLine, Play, Plus, SkipForward, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowRightLeft, ArrowUp, ChevronDown, ChevronUp, Clock3, Copy, Cpu, DatabaseZap, FileCode2, PencilLine, Play, Plus, SkipForward, Sparkles, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { DataTable } from '../components/data-table'
 import { MonacoSqlEditor } from '../components/monaco-sql-editor'
@@ -101,6 +101,7 @@ export function EngineLabPage() {
   const [selectedNotebookId, setSelectedNotebookId] = useState<string | null>(null)
   const [draftNotebook, setDraftNotebook] = useState<NotebookDocument | null>(null)
   const [cellResults, setCellResults] = useState<Record<string, NotebookCellRunResult>>({})
+  const [collapsedOutputs, setCollapsedOutputs] = useState<Record<string, boolean>>({})
   const [runFeedback, setRunFeedback] = useState<string | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
   const [cellActionState, setCellActionState] = useState<{ cellId: string; mode: 'single' | 'from_here' } | null>(null)
@@ -196,6 +197,7 @@ export function EngineLabPage() {
   const resetNotebookDraft = (engineOverride?: ExecutionEngine | null) => {
     setSelectedNotebookId(null)
     setCellResults({})
+    setCollapsedOutputs({})
     setRunFeedback(null)
     setRunError(null)
     setDraftNotebook(buildDefaultNotebook(engineOverride ?? selectedEngine))
@@ -234,6 +236,7 @@ export function EngineLabPage() {
       setSelectedNotebookId(duplicate.id)
       setDraftNotebook(duplicate)
       setCellResults({})
+      setCollapsedOutputs({})
       setRunFeedback(`Duplicated notebook as ${duplicate.name}`)
     } catch (error) {
       setRunError((error as Error).message)
@@ -403,6 +406,13 @@ export function EngineLabPage() {
       })
       return next
     })
+    setCollapsedOutputs((current) => {
+      const next = { ...current }
+      items.forEach((item) => {
+        next[item.cell_id] = false
+      })
+      return next
+    })
   }
 
   const handleRunCellAction = async (cellId: string, mode: 'single' | 'from_here') => {
@@ -448,6 +458,67 @@ export function EngineLabPage() {
     } catch (error) {
       setRunError((error as Error).message)
     }
+  }
+
+  const updateNotebookCells = (updater: (cells: NotebookCell[]) => NotebookCell[]) => {
+    setDraftNotebook((current) =>
+      current
+        ? {
+            ...current,
+            cells_json: updater(current.cells_json),
+          }
+        : current,
+    )
+  }
+
+  const moveCell = (cellId: string, direction: 'up' | 'down') => {
+    updateNotebookCells((cells) => {
+      const index = cells.findIndex((cell) => cell.id === cellId)
+      if (index === -1) return cells
+      const targetIndex = direction === 'up' ? index - 1 : index + 1
+      if (targetIndex < 0 || targetIndex >= cells.length) return cells
+      const next = [...cells]
+      const [cell] = next.splice(index, 1)
+      next.splice(targetIndex, 0, cell)
+      return next
+    })
+    setRunFeedback(`Moved ${direction === 'up' ? 'up' : 'down'} the selected cell.`)
+    setRunError(null)
+  }
+
+  const duplicateCell = (cell: NotebookCell, index: number) => {
+    const duplicatedCell = createCell(cell.code, cell.title?.trim() ? `${cell.title} Copy` : `Cell ${index + 2}`)
+    updateNotebookCells((cells) => {
+      const next = [...cells]
+      next.splice(index + 1, 0, duplicatedCell)
+      return next
+    })
+    setRunFeedback(`Duplicated ${cell.title?.trim() || `Cell ${index + 1}`}.`)
+    setRunError(null)
+  }
+
+  const removeCell = (cellId: string) => {
+    updateNotebookCells((cells) => cells.filter((item) => item.id !== cellId))
+    setCellResults((current) => {
+      const next = { ...current }
+      delete next[cellId]
+      return next
+    })
+    setCollapsedOutputs((current) => {
+      const next = { ...current }
+      delete next[cellId]
+      return next
+    })
+    if (assetTargetCellId === cellId) {
+      setAssetTargetCellId('new')
+    }
+  }
+
+  const toggleOutputCollapsed = (cellId: string) => {
+    setCollapsedOutputs((current) => ({
+      ...current,
+      [cellId]: !current[cellId],
+    }))
   }
 
   return (
@@ -807,6 +878,7 @@ export function EngineLabPage() {
               </Button>
               <Button tone="ghost" onClick={() => {
                 setCellResults({})
+                setCollapsedOutputs({})
                 setRunFeedback(null)
                 setRunError(null)
               }}>
@@ -975,6 +1047,7 @@ export function EngineLabPage() {
 
           {activeNotebook?.cells_json?.map((cell, index) => {
             const result = cellResults[cell.id]
+            const outputCollapsed = collapsedOutputs[cell.id] ?? false
             return (
               <Panel key={cell.id} className="space-y-4 p-0">
                 <div className={cn('flex items-center justify-between border-b px-5 py-4', theme === 'dark' ? 'border-white/10' : 'border-slate-100')}>
@@ -996,12 +1069,38 @@ export function EngineLabPage() {
                       className="mt-3"
                     />
                   </div>
-                  <div className="ml-4 flex items-center gap-3">
+                  <div className="ml-4 flex flex-wrap items-center justify-end gap-2">
                     {result ? (
                       <span className={cn('rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]', result.status === 'success' ? (theme === 'dark' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-700') : theme === 'dark' ? 'bg-rose-500/15 text-rose-300' : 'bg-rose-100 text-rose-700')}>
                         {result.status}
                       </span>
                     ) : null}
+                    <button
+                      type="button"
+                      className={cn('rounded-lg p-2 transition', theme === 'dark' ? 'text-white/55 hover:bg-white/5 hover:text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900')}
+                      onClick={() => moveCell(cell.id, 'up')}
+                      disabled={index === 0}
+                      title="Move cell up"
+                    >
+                      <ArrowUp className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      className={cn('rounded-lg p-2 transition', theme === 'dark' ? 'text-white/55 hover:bg-white/5 hover:text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900')}
+                      onClick={() => moveCell(cell.id, 'down')}
+                      disabled={index === (activeNotebook.cells_json.length ?? 0) - 1}
+                      title="Move cell down"
+                    >
+                      <ArrowDown className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      className={cn('rounded-lg p-2 transition', theme === 'dark' ? 'text-white/55 hover:bg-white/5 hover:text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900')}
+                      onClick={() => duplicateCell(cell, index)}
+                      title="Duplicate cell"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </button>
                     <Button
                       tone="ghost"
                       disabled={!selectedEngine?.available || runNotebookMutation.isPending || createNotebookMutation.isPending || updateNotebookMutation.isPending || Boolean(cellActionState)}
@@ -1025,17 +1124,9 @@ export function EngineLabPage() {
                     <button
                       type="button"
                       className={cn('rounded-lg p-2 transition', theme === 'dark' ? 'text-white/55 hover:bg-white/5 hover:text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900')}
-                      onClick={() =>
-                        setDraftNotebook((current) =>
-                          current
-                            ? {
-                                ...current,
-                                cells_json: current.cells_json.filter((item) => item.id !== cell.id),
-                              }
-                            : current,
-                        )
-                      }
+                      onClick={() => removeCell(cell.id)}
                       disabled={(activeNotebook.cells_json.length ?? 0) <= 1}
+                      title="Delete cell"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -1103,10 +1194,23 @@ export function EngineLabPage() {
                         >
                           Open in Chart Builder
                         </Button>
+                        <Button tone="ghost" onClick={() => toggleOutputCollapsed(cell.id)}>
+                          {outputCollapsed ? (
+                            <>
+                              <ChevronDown className="mr-2 h-4 w-4" />
+                              Expand Output
+                            </>
+                          ) : (
+                            <>
+                              <ChevronUp className="mr-2 h-4 w-4" />
+                              Collapse Output
+                            </>
+                          )}
+                        </Button>
                       </div>
                     </div>
 
-                    {result.warnings.length ? (
+                    {!outputCollapsed && result.warnings.length ? (
                       <div className={cn('rounded-2xl border p-4 text-sm', theme === 'dark' ? 'border-orange-500/20 bg-orange-500/10 text-orange-200' : 'border-orange-200 bg-orange-50 text-orange-700')}>
                         <p className="font-semibold">Runtime notes</p>
                         <ul className="mt-2 list-disc space-y-1 pl-5">
@@ -1117,14 +1221,20 @@ export function EngineLabPage() {
                       </div>
                     ) : null}
 
-                    {result.stdout ? (
+                    {!outputCollapsed && result.stdout ? (
                       <div className={cn('rounded-2xl p-4 font-mono text-sm text-emerald-300', theme === 'dark' ? 'bg-black' : 'bg-slate-950')}>
                         <p className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-200/70">Stdout</p>
                         <pre className="whitespace-pre-wrap">{result.stdout}</pre>
                       </div>
                     ) : null}
 
-                    {result.rows.length ? <DataTable columns={result.columns} rows={result.rows} /> : null}
+                    {outputCollapsed ? (
+                      <div className={cn('rounded-2xl border px-4 py-3 text-sm', theme === 'dark' ? 'border-white/10 bg-white/[0.03] text-white/70' : 'border-slate-200 bg-slate-50 text-slate-700')}>
+                        Output collapsed. This cell still has {result.row_count} rows available from the last run.
+                      </div>
+                    ) : result.rows.length ? (
+                      <DataTable columns={result.columns} rows={result.rows} />
+                    ) : null}
                   </div>
                 ) : null}
               </Panel>
