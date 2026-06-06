@@ -4,7 +4,8 @@ from sqlalchemy.engine import Engine
 
 def ensure_runtime_schema(db_engine: Engine) -> None:
     inspector = inspect(db_engine)
-    if "notebooks" not in inspector.get_table_names():
+    table_names = inspector.get_table_names()
+    if "notebooks" not in table_names:
         return
 
     notebook_columns = {column["name"] for column in inspector.get_columns("notebooks")}
@@ -12,7 +13,13 @@ def ensure_runtime_schema(db_engine: Engine) -> None:
         with db_engine.begin() as connection:
             connection.execute(text("ALTER TABLE notebooks ADD COLUMN latest_cell_results_json JSON"))
 
-    if "notebook_snippets" not in inspector.get_table_names():
+    if "semantic_datasets" in table_names:
+        dataset_columns = {column["name"] for column in inspector.get_columns("semantic_datasets")}
+        if "source_config_json" not in dataset_columns:
+            with db_engine.begin() as connection:
+                connection.execute(text("ALTER TABLE semantic_datasets ADD COLUMN source_config_json JSON"))
+
+    if "notebook_snippets" not in table_names:
         with db_engine.begin() as connection:
             connection.execute(
                 text(

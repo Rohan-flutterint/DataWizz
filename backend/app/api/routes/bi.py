@@ -89,9 +89,12 @@ def preview_dataset(dataset_id: str, db: Session = Depends(get_db)) -> DatasetPr
     dataset = db.query(SemanticDataset).filter(SemanticDataset.id == dataset_id).one_or_none()
     if dataset is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    if dataset.source_type != "delta_table":
-        raise HTTPException(status_code=400, detail="Preview is currently supported only for Delta table datasets")
-    preview = bi_service.preview_delta_source(db, table_name=dataset.source_ref)
+    if dataset.source_type == "delta_table":
+        preview = bi_service.preview_delta_source(db, table_name=dataset.source_ref)
+    elif dataset.source_type == "notebook_snapshot":
+        preview = bi_service.preview_notebook_snapshot_source(dataset)
+    else:
+        raise HTTPException(status_code=400, detail="Preview is currently supported only for Delta table or notebook snapshot datasets")
     return DatasetPreviewResponse(**preview)
 
 

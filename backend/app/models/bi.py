@@ -13,6 +13,7 @@ class SemanticDataset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     source_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_config_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     schema_json: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     metrics_json: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)

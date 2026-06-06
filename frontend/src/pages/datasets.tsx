@@ -4,11 +4,13 @@ import { useSearchParams } from 'react-router-dom'
 import { DataTable } from '../components/data-table'
 import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
 import { api } from '../lib/api'
+import { clearNotebookDatasetHandoff, readNotebookDatasetHandoff, type NotebookDatasetHandoff } from '../lib/dataset-handoff'
 import { formatDate } from '../lib/utils'
 
 type ExplorerSelection =
   | { kind: 'candidate'; id: string }
   | { kind: 'dataset'; id: string }
+  | { kind: 'notebook_candidate'; id: string }
 
 function inferDimensions(schema: { name: string; type: string }[] = []) {
   return schema
@@ -42,13 +44,29 @@ export function DatasetsPage() {
   const [dimensionsText, setDimensionsText] = useState('[]')
   const [metricsText, setMetricsText] = useState('[]')
   const [statusMessage, setStatusMessage] = useState('Select a curated candidate or an existing semantic dataset to inspect it.')
+  const [notebookHandoff, setNotebookHandoff] = useState<NotebookDatasetHandoff | null>(null)
 
   const candidates = datasetsQuery.data?.candidates ?? []
   const datasets = datasetsQuery.data?.items ?? []
+  const notebookCandidate =
+    notebookHandoff
+      ? {
+          id: `notebook:${notebookHandoff.cellId}`,
+          name: notebookHandoff.datasetName,
+          schema_name: 'notebook_snapshot',
+          source_type: 'notebook_snapshot',
+          source_ref: `notebook:${notebookHandoff.notebookName}:${notebookHandoff.cellId}`,
+          description: notebookHandoff.description ?? `Snapshot captured from ${notebookHandoff.notebookName}${notebookHandoff.cellTitle ? ` · ${notebookHandoff.cellTitle}` : ''}`,
+          schema_json: notebookHandoff.schema_json,
+          row_count: notebookHandoff.rows.length,
+          updated_at: new Date().toISOString(),
+        }
+      : null
 
   const filteredCandidates = useMemo(() => {
     const needle = search.trim().toLowerCase()
-    return candidates.filter((candidate) => {
+    const mergedCandidates = notebookCandidate ? [notebookCandidate, ...candidates] : candidates
+    return mergedCandidates.filter((candidate) => {
       if (!needle) return true
       return (
         candidate.name.toLowerCase().includes(needle) ||
@@ -56,7 +74,7 @@ export function DatasetsPage() {
         (candidate.description ?? '').toLowerCase().includes(needle)
       )
     })
-  }, [candidates, search])
+  }, [candidates, notebookCandidate, search])
 
   const filteredDatasets = useMemo(() => {
     const needle = search.trim().toLowerCase()
@@ -69,6 +87,13 @@ export function DatasetsPage() {
       )
     })
   }, [datasets, search])
+
+  useEffect(() => {
+    const handoff = readNotebookDatasetHandoff()
+    if (handoff) {
+      setNotebookHandoff(handoff)
+    }
+  }, [])
 
   useEffect(() => {
     const requestedDatasetId = searchParams.get('datasetId')
@@ -91,32 +116,50 @@ export function DatasetsPage() {
       return
     }
 
+    if (searchParams.get('source') === 'notebook' && notebookCandidate) {
+      setSelection((current) =>
+        current?.kind === 'notebook_candidate' && current.id === notebookCandidate.id
+          ? current
+          : { kind: 'notebook_candidate', id: notebookCandidate.id },
+      )
+      return
+    }
+
     if (selection) return
     if (filteredCandidates[0]) {
-      setSelection({ kind: 'candidate', id: filteredCandidates[0].id })
+      setSelection({
+        kind: filteredCandidates[0].source_type === 'notebook_snapshot' ? 'notebook_candidate' : 'candidate',
+        id: filteredCandidates[0].id,
+      })
       return
     }
     if (filteredDatasets[0]) {
       setSelection({ kind: 'dataset', id: filteredDatasets[0].id })
     }
-  }, [candidates, datasets, filteredCandidates, filteredDatasets, searchParams, selection])
+  }, [candidates, datasets, filteredCandidates, filteredDatasets, notebookCandidate, searchParams, selection])
 
   const selectedCandidate = selection?.kind === 'candidate' ? candidates.find((candidate) => candidate.id === selection.id) ?? null : null
+  const selectedNotebookCandidate = selection?.kind === 'notebook_candidate' && notebookCandidate?.id === selection.id ? notebookCandidate : null
   const selectedDataset = selection?.kind === 'dataset' ? datasets.find((dataset) => dataset.id === selection.id) ?? null : null
 
-  const selectedSchema = selectedCandidate?.schema_json ?? selectedDataset?.schema_json ?? []
-  const selectedSourceType = selectedCandidate?.source_type ?? selectedDataset?.source_type ?? ''
-  const selectedUpdatedAt = selectedCandidate?.updated_at ?? selectedDataset?.updated_at
+  const selectedSchema = selectedNotebookCandidate?.schema_json ?? selectedCandidate?.schema_json ?? selectedDataset?.schema_json ?? []
+  const selectedSourceType = selectedNotebookCandidate?.source_type ?? selectedCandidate?.source_type ?? selectedDataset?.source_type ?? ''
+  const selectedUpdatedAt = selectedNotebookCandidate?.updated_at ?? selectedCandidate?.updated_at ?? selectedDataset?.updated_at
 
   useEffect(() => {
-    if (selectedCandidate) {
-      const inferredDimensions = inferDimensions(selectedCandidate.schema_json ?? [])
-      const inferredMetrics = inferMetrics(selectedCandidate.schema_json ?? [])
-      setDatasetName(`${selectedCandidate.name}_dataset`)
-      setDatasetDescription(selectedCandidate.description ?? `Semantic dataset built from curated Delta table ${selectedCandidate.name}.`)
+    const activeCandidate = selectedNotebookCandidate ?? selectedCandidate
+    if (activeCandidate) {
+      const inferredDimensions = inferDimensions(activeCandidate.schema_json ?? [])
+      const inferredMetrics = inferMetrics(activeCandidate.schema_json ?? [])
+      setDatasetName(activeCandidate.name)
+      setDatasetDescription(activeCandidate.description ?? `Semantic dataset built from ${activeCandidate.source_type} source ${activeCandidate.name}.`)
       setDimensionsText(JSON.stringify(inferredDimensions, null, 2))
       setMetricsText(JSON.stringify(inferredMetrics, null, 2))
-      setStatusMessage(`Preparing semantic dataset draft for ${selectedCandidate.name}.`)
+      setStatusMessage(
+        activeCandidate.source_type === 'notebook_snapshot'
+          ? `Preparing notebook snapshot dataset draft for ${activeCandidate.name}.`
+          : `Preparing semantic dataset draft for ${activeCandidate.name}.`,
+      )
     } else if (selectedDataset) {
       setDatasetName(selectedDataset.name)
       setDatasetDescription(selectedDataset.description ?? '')
@@ -124,7 +167,7 @@ export function DatasetsPage() {
       setMetricsText(JSON.stringify(selectedDataset.metrics_json ?? [], null, 2))
       setStatusMessage(`Inspecting existing semantic dataset ${selectedDataset.name}.`)
     }
-  }, [selectedCandidate, selectedDataset])
+  }, [selectedCandidate, selectedDataset, selectedNotebookCandidate])
 
   const candidatePreviewQuery = useQuery({
     queryKey: ['bi', 'datasets', 'candidate-preview', selectedCandidate?.id],
@@ -138,7 +181,15 @@ export function DatasetsPage() {
     enabled: Boolean(selectedDataset),
   })
 
-  const preview = selectedCandidate ? candidatePreviewQuery.data : datasetPreviewQuery.data
+  const notebookPreview = selectedNotebookCandidate
+    ? {
+        columns: notebookHandoff?.columns ?? [],
+        rows: notebookHandoff?.rows ?? [],
+        row_count: notebookHandoff?.rows.length ?? 0,
+        schema_json: notebookHandoff?.schema_json ?? [],
+      }
+    : null
+  const preview = selectedNotebookCandidate ? notebookPreview : selectedCandidate ? candidatePreviewQuery.data : datasetPreviewQuery.data
 
   const createDatasetMutation = useMutation({
     mutationFn: api.createDataset,
@@ -146,6 +197,8 @@ export function DatasetsPage() {
       queryClient.invalidateQueries({ queryKey: ['bi', 'datasets'] })
       setSelection({ kind: 'dataset', id: dataset.id })
       setDatasetName(dataset.name)
+      clearNotebookDatasetHandoff()
+      setNotebookHandoff(null)
       setStatusMessage(
         dataset.name === variables.name
           ? `Registered semantic dataset ${dataset.name}.`
@@ -169,7 +222,7 @@ export function DatasetsPage() {
     },
   })
 
-  const canRegister = Boolean(selectedCandidate && datasetName.trim())
+  const canRegister = Boolean((selectedCandidate || selectedNotebookCandidate) && datasetName.trim())
 
   return (
     <div className="space-y-6">
@@ -206,9 +259,14 @@ export function DatasetsPage() {
                 <button
                   key={candidate.id}
                   type="button"
-                  onClick={() => setSelection({ kind: 'candidate', id: candidate.id })}
+                  onClick={() =>
+                    setSelection({
+                      kind: candidate.source_type === 'notebook_snapshot' ? 'notebook_candidate' : 'candidate',
+                      id: candidate.id,
+                    })
+                  }
                   className={`w-full rounded-2xl border p-4 text-left transition ${
-                    selection?.kind === 'candidate' && selection.id === candidate.id ? 'border-lagoon bg-cyan-50/70 shadow-sm' : 'border-slate-100 bg-slate-50/80'
+                    ((selection?.kind === 'candidate' || selection?.kind === 'notebook_candidate') && selection.id === candidate.id) ? 'border-lagoon bg-cyan-50/70 shadow-sm' : 'border-slate-100 bg-slate-50/80'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -267,22 +325,22 @@ export function DatasetsPage() {
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">
-                      {selectedCandidate ? 'Candidate Dataset' : 'Semantic Dataset'}
+                      {selectedNotebookCandidate ? 'Notebook Snapshot Candidate' : selectedCandidate ? 'Candidate Dataset' : 'Semantic Dataset'}
                     </p>
-                    <h2 className="mt-2 break-words font-display text-3xl text-ink">{selectedCandidate?.name || selectedDataset?.name}</h2>
+                    <h2 className="mt-2 break-words font-display text-3xl text-ink">{selectedNotebookCandidate?.name || selectedCandidate?.name || selectedDataset?.name}</h2>
                     <p className="mt-3 text-sm leading-6 text-slate/70">
-                      {selectedCandidate?.description || selectedDataset?.description || 'Inspect schema and model reusable semantic metadata for downstream charts and dashboards.'}
+                      {selectedNotebookCandidate?.description || selectedCandidate?.description || selectedDataset?.description || 'Inspect schema and model reusable semantic metadata for downstream charts and dashboards.'}
                     </p>
                   </div>
                   <span className="shrink-0 self-start whitespace-nowrap rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-lagoon">
-                    {selectedCandidate ? 'Ready to register' : 'Registered'}
+                    {selectedNotebookCandidate || selectedCandidate ? 'Ready to register' : 'Registered'}
                   </span>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-[minmax(0,1.6fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)]">
                   <div className="min-w-0 rounded-2xl bg-slate-50 p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Source</p>
-                    <p className="mt-2 break-all text-sm font-semibold text-ink">{selectedCandidate?.source_ref || selectedDataset?.source_ref}</p>
+                    <p className="mt-2 break-all text-sm font-semibold text-ink">{selectedNotebookCandidate?.source_ref || selectedCandidate?.source_ref || selectedDataset?.source_ref}</p>
                   </div>
                   <div className="rounded-2xl bg-slate-50 p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Columns</p>
@@ -294,7 +352,7 @@ export function DatasetsPage() {
                   </div>
                 </div>
 
-                {selectedCandidate || selectedDataset ? (
+                {selectedNotebookCandidate || selectedCandidate || selectedDataset ? (
                   <div className="grid gap-4 lg:grid-cols-2">
                     <div>
                       <Label>Dataset Name</Label>
@@ -321,19 +379,34 @@ export function DatasetsPage() {
                   </div>
                 ) : null}
 
-                {selectedCandidate ? (
+                {selectedNotebookCandidate || selectedCandidate ? (
                   <Button
                     disabled={!canRegister || createDatasetMutation.isPending}
                     onClick={() =>
-                      createDatasetMutation.mutate({
-                        name: datasetName.trim(),
-                        source_type: selectedCandidate.source_type,
-                        source_ref: selectedCandidate.source_ref,
-                        description: datasetDescription.trim() || null,
-                        schema_json: selectedCandidate.schema_json ?? [],
-                        dimensions_json: parseJsonArray(dimensionsText),
-                        metrics_json: parseJsonArray(metricsText),
-                      })
+                      (() => {
+                        const sourceCandidate = selectedNotebookCandidate || selectedCandidate
+                        if (!sourceCandidate) return
+                        createDatasetMutation.mutate({
+                          name: datasetName.trim(),
+                          source_type: sourceCandidate.source_type,
+                          source_ref: sourceCandidate.source_ref,
+                          source_config_json:
+                            sourceCandidate.source_type === 'notebook_snapshot' && notebookHandoff
+                              ? {
+                                  notebook_name: notebookHandoff.notebookName,
+                                  cell_id: notebookHandoff.cellId,
+                                  cell_title: notebookHandoff.cellTitle ?? null,
+                                  snapshot_columns: notebookHandoff.columns,
+                                  snapshot_rows: notebookHandoff.rows,
+                                  snapshot_schema: notebookHandoff.schema_json,
+                                }
+                              : null,
+                          description: datasetDescription.trim() || null,
+                          schema_json: sourceCandidate.schema_json ?? [],
+                          dimensions_json: parseJsonArray(dimensionsText),
+                          metrics_json: parseJsonArray(metricsText),
+                        })
+                      })()
                     }
                   >
                     {createDatasetMutation.isPending ? 'Registering...' : 'Register Semantic Dataset'}
@@ -348,6 +421,7 @@ export function DatasetsPage() {
                           name: datasetName.trim(),
                           source_type: selectedDataset.source_type,
                           source_ref: selectedDataset.source_ref,
+                          source_config_json: selectedDataset.source_config_json ?? null,
                           description: datasetDescription.trim() || null,
                           schema_json: selectedDataset.schema_json ?? [],
                           dimensions_json: parseJsonArray(dimensionsText),

@@ -23,6 +23,7 @@ class SemanticDatasetCreateRequest(BaseModel):
     name: str = Field(min_length=1)
     source_type: str
     source_ref: str
+    source_config: dict | None = Field(default=None, alias="source_config_json", serialization_alias="source_config_json")
     description: str | None = None
     schema_definition: list[dict] | None = Field(default=None, alias="schema_json", serialization_alias="schema_json")
     metrics_json: list[dict] | None = None
@@ -35,6 +36,7 @@ class SemanticDatasetUpdateRequest(BaseModel):
     name: str = Field(min_length=1)
     source_type: str
     source_ref: str
+    source_config: dict | None = Field(default=None, alias="source_config_json", serialization_alias="source_config_json")
     description: str | None = None
     schema_definition: list[dict] | None = Field(default=None, alias="schema_json", serialization_alias="schema_json")
     metrics_json: list[dict] | None = None
@@ -47,6 +49,7 @@ class SemanticDatasetRead(TimestampedModel):
     name: str
     source_type: str
     source_ref: str
+    source_config: dict | None = Field(default=None, alias="source_config_json", serialization_alias="source_config_json")
     description: str | None = None
     schema_definition: list[dict] | None = Field(default=None, alias="schema_json", serialization_alias="schema_json")
     metrics_json: list[dict] | None = None
