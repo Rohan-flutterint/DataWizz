@@ -13,11 +13,21 @@ export type UploadedFile = {
 
 export type FileProfileSummary = {
   total_rows: number
+  distinct_rows: number
+  duplicate_rows: number
+  duplicate_ratio: number
   total_columns: number
+  total_blank_cells: number
   null_cells: number
+  completeness_ratio: number
   columns_with_nulls: number
   columns_with_blank_values: number
   quality_indicators: string[]
+}
+
+export type FileColumnTopValue = {
+  value: string
+  count: number
 }
 
 export type FileColumnProfile = {
@@ -25,13 +35,18 @@ export type FileColumnProfile = {
   type: string
   profile_kind: 'numeric' | 'temporal' | 'boolean' | 'string' | 'other'
   null_count: number
+  non_null_count: number
   distinct_count: number
   blank_count: number
   completeness_ratio: number
+  uniqueness_ratio: number
+  cardinality_band: 'empty' | 'constant' | 'low' | 'medium' | 'high' | 'unique'
   sample_values: string[]
+  top_values: FileColumnTopValue[]
   min_value?: string | null
   max_value?: string | null
   avg_value?: number | null
+  stddev_value?: number | null
   true_count?: number | null
   false_count?: number | null
   quality_indicators: string[]

@@ -55,6 +55,20 @@ class DuckDBService:
             indicators.append("high cardinality")
         return indicators
 
+    def _cardinality_band(self, *, row_count: int, distinct_count: int) -> str:
+        if row_count <= 0 or distinct_count <= 0:
+            return "empty"
+        if distinct_count <= 1:
+            return "constant"
+        if distinct_count == row_count and row_count > 1:
+            return "unique"
+        ratio = distinct_count / row_count
+        if ratio < 0.1:
+            return "low"
+        if ratio < 0.5:
+            return "medium"
+        return "high"
+
     def _profile_column(
         self,
         conn: duckdb.DuckDBPyConnection,
@@ -81,6 +95,7 @@ class DuckDBService:
         min_value = None
         max_value = None
         avg_value = None
+        stddev_value = None
         true_count = None
         false_count = None
 
@@ -110,12 +125,15 @@ class DuckDBService:
         if family == "numeric":
             avg_result = conn.execute(
                 f"""
-                SELECT AVG(TRY_CAST({quoted_column} AS DOUBLE))
+                SELECT
+                  AVG(TRY_CAST({quoted_column} AS DOUBLE)),
+                  STDDEV_POP(TRY_CAST({quoted_column} AS DOUBLE))
                 FROM {view_name}
                 WHERE {quoted_column} IS NOT NULL
                 """
             ).fetchone()
             avg_value = float(avg_result[0]) if avg_result and avg_result[0] is not None else None
+            stddev_value = float(avg_result[1]) if avg_result and len(avg_result) > 1 and avg_result[1] is not None else None
 
         if family == "boolean":
             true_false_stats = conn.execute(
@@ -142,19 +160,41 @@ class DuckDBService:
             if item and item[0] is not None
         ]
 
+        top_values = [
+            {"value": item[0], "count": int(item[1] or 0)}
+            for item in conn.execute(
+                f"""
+                SELECT CAST({quoted_column} AS VARCHAR) AS value, COUNT(*) AS value_count
+                FROM {view_name}
+                WHERE {quoted_column} IS NOT NULL
+                GROUP BY 1
+                ORDER BY value_count DESC, value ASC
+                LIMIT 3
+                """
+            ).fetchall()
+            if item and item[0] is not None
+        ]
+
+        non_null_count = max(row_count - null_count, 0)
         completeness_ratio = round(((row_count - null_count) / row_count) * 100, 1) if row_count else 0.0
+        uniqueness_ratio = round((distinct_count / non_null_count) * 100, 1) if non_null_count else 0.0
         return {
             "name": column_name,
             "type": column_type,
             "profile_kind": family,
             "null_count": null_count,
+            "non_null_count": non_null_count,
             "distinct_count": distinct_count,
             "blank_count": blank_count,
             "completeness_ratio": completeness_ratio,
+            "uniqueness_ratio": uniqueness_ratio,
+            "cardinality_band": self._cardinality_band(row_count=non_null_count or row_count, distinct_count=distinct_count),
             "sample_values": sample_values,
+            "top_values": top_values,
             "min_value": min_value,
             "max_value": max_value,
             "avg_value": avg_value,
+            "stddev_value": stddev_value,
             "true_count": true_count,
             "false_count": false_count,
             "quality_indicators": self._build_quality_indicators(
@@ -238,6 +278,10 @@ class DuckDBService:
             count = conn.execute(f"SELECT COUNT(*) AS total FROM {view_name}").fetchone()[0]
             schema = [{"name": field.name, "type": str(field.type)} for field in preview.schema]
             row_count = int(count)
+            distinct_rows = int(
+                conn.execute(f"SELECT COUNT(*) FROM (SELECT DISTINCT * FROM {view_name})").fetchone()[0]
+                or 0
+            ) if row_count else 0
             column_profiles = [
                 self._profile_column(
                     conn,
@@ -249,8 +293,13 @@ class DuckDBService:
                 for field in schema
             ]
             total_null_cells = sum(item["null_count"] for item in column_profiles)
+            total_blank_cells = sum(item["blank_count"] for item in column_profiles)
             columns_with_nulls = sum(1 for item in column_profiles if item["null_count"] > 0)
             columns_with_blank_values = sum(1 for item in column_profiles if item["blank_count"] > 0)
+            duplicate_rows = max(row_count - distinct_rows, 0)
+            duplicate_ratio = round((duplicate_rows / row_count) * 100, 1) if row_count else 0.0
+            total_cells = row_count * len(schema)
+            completeness_ratio = round(((total_cells - total_null_cells) / total_cells) * 100, 1) if total_cells else 0.0
             quality_indicators: list[str] = []
             if row_count == 0:
                 quality_indicators.append("empty file")
@@ -262,6 +311,8 @@ class DuckDBService:
                 quality_indicators.append("constant columns present")
             if any(item["distinct_count"] == row_count for item in column_profiles if row_count > 1):
                 quality_indicators.append("high-cardinality fields present")
+            if duplicate_rows > 0:
+                quality_indicators.append("duplicate rows detected")
             return {
                 "columns": preview.column_names,
                 "rows": self._normalize_rows(preview.to_pylist()),
@@ -269,8 +320,13 @@ class DuckDBService:
                 "schema": schema,
                 "profile_summary": {
                     "total_rows": row_count,
+                    "distinct_rows": distinct_rows,
+                    "duplicate_rows": duplicate_rows,
+                    "duplicate_ratio": duplicate_ratio,
                     "total_columns": len(schema),
+                    "total_blank_cells": total_blank_cells,
                     "null_cells": total_null_cells,
+                    "completeness_ratio": completeness_ratio,
                     "columns_with_nulls": columns_with_nulls,
                     "columns_with_blank_values": columns_with_blank_values,
                     "quality_indicators": quality_indicators,
