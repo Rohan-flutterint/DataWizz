@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowRightLeft, ArrowUp, ChevronDown, ChevronUp, Clock3, Copy, Cpu, DatabaseZap, FileCode2, PencilLine, Play, Plus, SkipForward, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowRightLeft, ArrowUp, Check, ChevronDown, ChevronUp, Clock3, Copy, Cpu, DatabaseZap, Download, FileCode2, PencilLine, Play, Plus, SkipForward, Sparkles, Trash2, X } from 'lucide-react'
 import { type DragEvent, useEffect, useMemo, useState } from 'react'
 import { DataTable } from '../components/data-table'
 import { MonacoSqlEditor } from '../components/monaco-sql-editor'
@@ -41,6 +41,13 @@ function createCell(code = '', title?: string): NotebookCell {
 function createMarkdownCell(code = '', title?: string): NotebookCell {
   const cellId = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `cell_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   return { id: cellId, title, kind: 'markdown', code }
+}
+
+function duplicateNotebookCell(cell: NotebookCell, fallbackTitle: string): NotebookCell {
+  const nextTitle = cell.title?.trim() ? `${cell.title} Copy` : fallbackTitle
+  return (cell.kind || 'code') === 'markdown'
+    ? createMarkdownCell(cell.code, nextTitle)
+    : createCell(cell.code, nextTitle)
 }
 
 function toRawViewName(fileName: string) {
@@ -165,6 +172,7 @@ export function EngineLabPage() {
   const [draftNotebook, setDraftNotebook] = useState<NotebookDocument | null>(null)
   const [cellResults, setCellResults] = useState<Record<string, NotebookCellRunResult>>({})
   const [collapsedOutputs, setCollapsedOutputs] = useState<Record<string, boolean>>({})
+  const [renamingCellId, setRenamingCellId] = useState<string | null>(null)
   const [runFeedback, setRunFeedback] = useState<string | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
   const [cellActionState, setCellActionState] = useState<{ cellId: string; mode: 'single' | 'from_here' } | null>(null)
@@ -206,6 +214,8 @@ export function EngineLabPage() {
     if (!detail) return
     setDraftNotebook(detail.notebook)
     setActiveEngineId(detail.notebook.engine_id)
+    setRenamingCellId(null)
+    setCollapsedOutputs({})
     const latestCellResults = detail.notebook.latest_cell_results_json ?? []
     const nextResults: Record<string, NotebookCellRunResult> = {}
     latestCellResults.forEach((item) => {
@@ -266,11 +276,13 @@ export function EngineLabPage() {
   const rawAssets = filesQuery.data?.items ?? []
   const curatedAssets = tablesQuery.data?.items ?? []
   const snippetLibrary = notebookSnippetsQuery.data?.items ?? []
+  const notebookOutputCount = Object.keys(cellResults).length
 
   const resetNotebookDraft = (engineOverride?: ExecutionEngine | null) => {
     setSelectedNotebookId(null)
     setCellResults({})
     setCollapsedOutputs({})
+    setRenamingCellId(null)
     setRunFeedback(null)
     setRunError(null)
     setDraftNotebook(buildDefaultNotebook(engineOverride ?? selectedEngine))
@@ -647,7 +659,7 @@ export function EngineLabPage() {
   }
 
   const duplicateCell = (cell: NotebookCell, index: number) => {
-    const duplicatedCell = createCell(cell.code, cell.title?.trim() ? `${cell.title} Copy` : `Cell ${index + 2}`)
+    const duplicatedCell = duplicateNotebookCell(cell, `Cell ${index + 2}`)
     updateNotebookCells((cells) => {
       const next = [...cells]
       next.splice(index + 1, 0, duplicatedCell)
@@ -679,6 +691,44 @@ export function EngineLabPage() {
       ...current,
       [cellId]: !current[cellId],
     }))
+  }
+
+  const setAllOutputsCollapsed = (collapsed: boolean) => {
+    const resultCellIds = Object.keys(cellResults)
+    if (!resultCellIds.length) return
+    setCollapsedOutputs((current) => {
+      const next = { ...current }
+      resultCellIds.forEach((cellId) => {
+        next[cellId] = collapsed
+      })
+      return next
+    })
+    setRunFeedback(collapsed ? 'Collapsed all notebook outputs.' : 'Expanded all notebook outputs.')
+    setRunError(null)
+  }
+
+  const downloadNotebookCellJson = (cell: NotebookCell, result: NotebookCellRunResult) => {
+    const fileName = `${toArtifactName(activeNotebook?.name, cell.title || cell.id)}.json`
+    const payload = {
+      cell_id: cell.id,
+      title: cell.title ?? null,
+      columns: result.columns,
+      rows: result.rows,
+      row_count: result.row_count,
+      execution_ms: result.execution_ms,
+      warnings: result.warnings,
+      stdout: result.stdout ?? null,
+      message: result.message ?? null,
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = window.URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = fileName
+    anchor.click()
+    window.URL.revokeObjectURL(url)
+    setRunFeedback(`Downloaded JSON output for ${cell.title?.trim() || cell.id}.`)
+    setRunError(null)
   }
 
   const handleCellDragStart = (event: DragEvent<HTMLElement>, cellId: string) => {
@@ -1091,6 +1141,12 @@ export function EngineLabPage() {
               }}>
                 Clear Outputs
               </Button>
+              <Button tone="ghost" onClick={() => setAllOutputsCollapsed(true)} disabled={!notebookOutputCount}>
+                Collapse All Outputs
+              </Button>
+              <Button tone="ghost" onClick={() => setAllOutputsCollapsed(false)} disabled={!notebookOutputCount}>
+                Expand All Outputs
+              </Button>
               {selectedNotebookId ? (
                 <Button
                   tone="ghost"
@@ -1386,21 +1442,65 @@ export function EngineLabPage() {
                 <div className={cn('flex items-center justify-between border-b px-5 py-4', theme === 'dark' ? 'border-white/10' : 'border-slate-100')}>
                   <div className="flex-1">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Cell {index + 1}</p>
-                    <Input
-                      value={cell.title ?? ''}
-                      onChange={(event) =>
-                        setDraftNotebook((current) =>
-                          current
-                            ? {
-                                ...current,
-                                cells_json: current.cells_json.map((item) => (item.id === cell.id ? { ...item, title: event.target.value } : item)),
-                              }
-                            : current,
-                        )
-                      }
-                      placeholder={`Cell ${index + 1} title`}
-                      className="mt-3"
-                    />
+                    {renamingCellId === cell.id ? (
+                      <div className="mt-3 flex items-center gap-2">
+                        <Input
+                          autoFocus
+                          value={cell.title ?? ''}
+                          onChange={(event) =>
+                            setDraftNotebook((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    cells_json: current.cells_json.map((item) => (item.id === cell.id ? { ...item, title: event.target.value } : item)),
+                                  }
+                                : current,
+                            )
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              setRenamingCellId(null)
+                              setRunFeedback(`Renamed ${cell.title?.trim() || `Cell ${index + 1}`}. Save the notebook to persist the change.`)
+                              setRunError(null)
+                            }
+                            if (event.key === 'Escape') {
+                              setRenamingCellId(null)
+                            }
+                          }}
+                          placeholder={`Cell ${index + 1} title`}
+                        />
+                        <button
+                          type="button"
+                          className={cn('rounded-lg p-2 transition', theme === 'dark' ? 'text-emerald-300 hover:bg-white/5' : 'text-emerald-700 hover:bg-slate-100')}
+                          onClick={() => {
+                            setRenamingCellId(null)
+                            setRunFeedback(`Renamed ${cell.title?.trim() || `Cell ${index + 1}`}. Save the notebook to persist the change.`)
+                            setRunError(null)
+                          }}
+                          title="Finish renaming"
+                        >
+                          <Check className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          className={cn('rounded-lg p-2 transition', theme === 'dark' ? 'text-white/55 hover:bg-white/5 hover:text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900')}
+                          onClick={() => setRenamingCellId(null)}
+                          title="Close rename"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                        <h3 className="font-display text-2xl text-ink">{cell.title?.trim() || `Cell ${index + 1}`}</h3>
+                        <span className={cn('rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]', isMarkdownCell ? (theme === 'dark' ? 'bg-[#f6f24a]/15 text-[#f6f24a]' : 'bg-[#fff4bf] text-[#7a6500]') : theme === 'dark' ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-100 text-lagoon')}>
+                          {isMarkdownCell ? 'markdown' : 'code'}
+                        </span>
+                        <span className={cn('rounded-full px-3 py-1 text-xs font-medium', theme === 'dark' ? 'bg-white/[0.04] text-white/60' : 'bg-slate-100 text-slate-600')}>
+                          Drag to reorder
+                        </span>
+                      </div>
+                    )}
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
@@ -1454,6 +1554,14 @@ export function EngineLabPage() {
                       title="Drag to reorder cell"
                     >
                       <ArrowRightLeft className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      className={cn('rounded-lg p-2 transition', theme === 'dark' ? 'text-white/55 hover:bg-white/5 hover:text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900')}
+                      onClick={() => setRenamingCellId((current) => (current === cell.id ? null : cell.id))}
+                      title="Rename cell"
+                    >
+                      <PencilLine className="h-4 w-4" />
                     </button>
                     {result ? (
                       <span className={cn('rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]', result.status === 'success' ? (theme === 'dark' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-700') : theme === 'dark' ? 'bg-rose-500/15 text-rose-300' : 'bg-rose-100 text-rose-700')}>
@@ -1589,6 +1697,16 @@ export function EngineLabPage() {
                         {result.message ? <p className="mt-2 max-w-3xl text-sm text-slate/75">{result.message}</p> : null}
                       </div>
                       <div className="flex flex-wrap gap-3">
+                        <Button
+                          tone="ghost"
+                          onClick={() => {
+                            downloadNotebookCellJson(cell, result)
+                          }}
+                          disabled={!result.columns.length}
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Download JSON
+                        </Button>
                         <Button
                           tone="ghost"
                           onClick={() => {
