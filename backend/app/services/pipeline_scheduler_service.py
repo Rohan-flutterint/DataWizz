@@ -88,6 +88,13 @@ class PipelineSchedulerService:
         next_run_local = croniter(cron, reference_local).get_next(datetime)
         return next_run_local <= now_local, next_run_local
 
+    def compute_next_run_at(self, pipeline: Pipeline, last_scheduled_run: PipelineRun | None) -> datetime | None:
+        now_local = datetime.now(timezone.utc).astimezone(self.timezone)
+        _, next_run_local = self._compute_due(pipeline, last_scheduled_run, now_local=now_local)
+        if next_run_local is None:
+            return None
+        return next_run_local.astimezone(timezone.utc)
+
     def run_due_pipelines_once(self) -> dict[str, Any]:
         summary: dict[str, Any] = {
             "checked": 0,
@@ -103,6 +110,7 @@ class PipelineSchedulerService:
                 db.query(Pipeline)
                 .filter(Pipeline.schedule_cron.is_not(None))
                 .filter(Pipeline.schedule_cron != "")
+                .filter(Pipeline.status == "active")
                 .order_by(Pipeline.updated_at.desc())
                 .all()
             )
@@ -181,6 +189,7 @@ class PipelineSchedulerService:
                 db.query(Pipeline)
                 .filter(Pipeline.schedule_cron.is_not(None))
                 .filter(Pipeline.schedule_cron != "")
+                .filter(Pipeline.status == "active")
                 .count()
             )
 

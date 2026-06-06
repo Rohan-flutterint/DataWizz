@@ -170,6 +170,7 @@ export type Pipeline = {
   description?: string
   status: string
   schedule_cron?: string
+  next_run_at?: string | null
   definition_json: { nodes: PipelineNode[]; edges: PipelineEdge[] }
   created_at: string
   updated_at: string
@@ -245,6 +246,14 @@ export type PipelineSchedulerStatus = {
   last_error?: string | null
   managed_pipeline_count: number
   last_summary: PipelineSchedulerSweep
+}
+
+export type PipelineScheduleDetail = {
+  pipeline: Pipeline
+  scheduler_state: string
+  next_run_at?: string | null
+  last_scheduled_run_at?: string | null
+  recent_scheduled_runs: PipelineRun[]
 }
 
 export type SemanticDataset = {

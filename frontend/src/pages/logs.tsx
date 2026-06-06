@@ -13,7 +13,7 @@ export function JobLogsPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [statusMessage, setStatusMessage] = useState('Filter logs by pipeline run, node, and execution status to isolate failures or verify specific steps.')
 
-  const runsQuery = useQuery({ queryKey: ['runs'], queryFn: api.listRuns })
+  const runsQuery = useQuery({ queryKey: ['runs'], queryFn: () => api.listRuns() })
   const logsQuery = useQuery({
     queryKey: ['logs', runIdFilter, nodeIdFilter, statusFilter],
     queryFn: () =>
