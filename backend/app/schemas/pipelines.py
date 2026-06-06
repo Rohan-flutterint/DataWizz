@@ -45,6 +45,7 @@ class PipelineRead(TimestampedModel):
     status: str
     schedule_cron: str | None = None
     definition_json: dict
+    next_run_at: str | None = None
 
 
 class PipelineListResponse(BaseModel):
@@ -120,3 +121,11 @@ class SchedulerStatusResponse(BaseModel):
     last_error: str | None = None
     managed_pipeline_count: int
     last_summary: SchedulerSweepResponse
+
+
+class PipelineScheduleDetailResponse(BaseModel):
+    pipeline: PipelineRead
+    scheduler_state: str
+    next_run_at: str | None = None
+    last_scheduled_run_at: str | None = None
+    recent_scheduled_runs: list[PipelineRunRead] = Field(default_factory=list)

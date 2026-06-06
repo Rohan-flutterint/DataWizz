@@ -10,7 +10,7 @@ export function PipelineRunsPage() {
   const { hasAnyRole } = useAuth()
   const canRetry = hasAnyRole('admin', 'analyst')
   const queryClient = useQueryClient()
-  const runsQuery = useQuery({ queryKey: ['runs'], queryFn: api.listRuns })
+  const runsQuery = useQuery({ queryKey: ['runs'], queryFn: () => api.listRuns() })
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState('Select a run to inspect details, diagnose failures, and retry a pipeline without returning to the builder.')
   const detailQuery = useQuery({
