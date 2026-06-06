@@ -157,12 +157,12 @@ class ExecutionEngineService:
 
         try:
             for cell in cells[:start_index]:
-                if not cell.get("code"):
+                if cell.get("kind") == "markdown" or not cell.get("code"):
                     continue
                 self._execute_runtime_cell(runtime, cell["code"], db, limit)
 
             for index, cell in enumerate(cells[start_index : end_index + 1], start=start_index + 1):
-                if not cell.get("code"):
+                if cell.get("kind") == "markdown" or not cell.get("code"):
                     continue
                 result = self._execute_runtime_cell(runtime, cell["code"], db, limit)
                 cell_results.append(
@@ -247,10 +247,12 @@ class ExecutionEngineService:
         )
 
         for cell in cells[:target_index]:
-            if not cell.get("code"):
+            if cell.get("kind") == "markdown" or not cell.get("code"):
                 continue
             self._execute_runtime_cell(runtime, cell["code"], db, 200)
 
+        if target_cell.get("kind") == "markdown":
+            raise ValueError("Markdown cells cannot be executed or exported. Choose a code cell instead.")
         if not target_cell.get("code"):
             raise ValueError("This notebook cell is empty and cannot be exported.")
 

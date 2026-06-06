@@ -478,6 +478,7 @@ export type NotebookExecutionResponse = {
 export type NotebookCell = {
   id: string
   title?: string | null
+  kind?: 'code' | 'markdown'
   code: string
 }
 

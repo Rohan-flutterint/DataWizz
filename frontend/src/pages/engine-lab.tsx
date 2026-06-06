@@ -34,7 +34,12 @@ function capabilityPill(enabled: boolean, label: string, theme: 'light' | 'dark'
 
 function createCell(code = '', title?: string): NotebookCell {
   const cellId = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `cell_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-  return { id: cellId, title, code }
+  return { id: cellId, title, kind: 'code', code }
+}
+
+function createMarkdownCell(code = '', title?: string): NotebookCell {
+  const cellId = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `cell_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  return { id: cellId, title, kind: 'markdown', code }
 }
 
 function toRawViewName(fileName: string) {
@@ -76,6 +81,37 @@ function toArtifactName(...parts: Array<string | null | undefined>) {
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '')
   return value || 'notebook_output'
+}
+
+function renderMarkdownBlocks(markdown: string) {
+  return markdown.split('\n').map((rawLine, index) => {
+    const line = rawLine.trim()
+    if (!line) {
+      return <div key={`space-${index}`} className="h-2" />
+    }
+    if (line.startsWith('### ')) {
+      return <h3 key={`h3-${index}`} className="text-lg font-semibold text-ink">{line.slice(4)}</h3>
+    }
+    if (line.startsWith('## ')) {
+      return <h2 key={`h2-${index}`} className="font-display text-2xl text-ink">{line.slice(3)}</h2>
+    }
+    if (line.startsWith('# ')) {
+      return <h1 key={`h1-${index}`} className="font-display text-3xl text-ink">{line.slice(2)}</h1>
+    }
+    if (line.startsWith('- ') || line.startsWith('* ')) {
+      return (
+        <div key={`li-${index}`} className="flex items-start gap-2 text-sm leading-6 text-slate/80">
+          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-current" />
+          <span>{line.slice(2)}</span>
+        </div>
+      )
+    }
+    return (
+      <p key={`p-${index}`} className="whitespace-pre-wrap text-sm leading-7 text-slate/80">
+        {rawLine}
+      </p>
+    )
+  })
 }
 
 function buildDefaultNotebook(engine: ExecutionEngine | null): NotebookDocument | null {
@@ -215,6 +251,7 @@ export function EngineLabPage() {
       cells_json: activeNotebook.cells_json.map((cell) => ({
         id: cell.id,
         title: cell.title || '',
+        kind: cell.kind || 'code',
         code: cell.code,
       })),
     }
@@ -268,16 +305,20 @@ export function EngineLabPage() {
     setRunFeedback(null)
     setDraftNotebook((current) => {
       if (!current) return current
-      if (assetTargetCellId === 'new' || !current.cells_json.some((cell) => cell.id === assetTargetCellId)) {
+      const target = current.cells_json.find((cell) => cell.id === assetTargetCellId)
+      if (assetTargetCellId === 'new' || !target || (target.kind || 'code') === 'markdown') {
         const nextCell = createCell(snippet, title)
         setAssetTargetCellId(nextCell.id)
-        setRunFeedback(`Inserted ${title} into a new notebook cell.`)
+        setRunFeedback(
+          target && (target.kind || 'code') === 'markdown'
+            ? `Inserted ${title} into a new code cell because the selected target is a markdown cell.`
+            : `Inserted ${title} into a new notebook cell.`,
+        )
         return {
           ...current,
           cells_json: [...current.cells_json, nextCell],
         }
       }
-      const target = current.cells_json.find((cell) => cell.id === assetTargetCellId)
       const nextCode = target?.code?.trim() ? `${target.code.trim()}\n\n${snippet}` : snippet
       setRunFeedback(`Inserted ${title} into ${target?.title || 'the selected cell'}.`)
       return {
@@ -921,6 +962,22 @@ export function EngineLabPage() {
                 <Plus className="mr-2 h-4 w-4" />
                 Add Cell
               </Button>
+              <Button
+                tone="ghost"
+                onClick={() =>
+                  setDraftNotebook((current) =>
+                    current
+                      ? {
+                          ...current,
+                          cells_json: [...current.cells_json, createMarkdownCell('# Notes\n\nAdd context, assumptions, or analysis here.', `Notes ${current.cells_json.length + 1}`)],
+                        }
+                      : current,
+                  )
+                }
+              >
+                <PencilLine className="mr-2 h-4 w-4" />
+                Add Markdown
+              </Button>
               <Button tone="ghost" onClick={() => selectedEngine && setDraftNotebook((current) => (current ? { ...current, cells_json: [createCell(selectedEngine.sample_code, 'Starter cell')] } : current))}>
                 Load Engine Sample
               </Button>
@@ -1096,6 +1153,8 @@ export function EngineLabPage() {
           {activeNotebook?.cells_json?.map((cell, index) => {
             const result = cellResults[cell.id]
             const outputCollapsed = collapsedOutputs[cell.id] ?? false
+            const cellKind = cell.kind || 'code'
+            const isMarkdownCell = cellKind === 'markdown'
             return (
               <Panel
                 key={cell.id}
@@ -1133,6 +1192,48 @@ export function EngineLabPage() {
                       placeholder={`Cell ${index + 1} title`}
                       className="mt-3"
                     />
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className={cn(
+                          'rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] transition',
+                          !isMarkdownCell
+                            ? theme === 'dark'
+                              ? 'bg-cyan-500/15 text-cyan-300'
+                              : 'bg-cyan-100 text-lagoon'
+                            : theme === 'dark'
+                              ? 'bg-white/5 text-white/55 hover:bg-white/10'
+                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200',
+                        )}
+                        onClick={() =>
+                          updateNotebookCells((cells) =>
+                            cells.map((item) => (item.id === cell.id ? { ...item, kind: 'code' } : item)),
+                          )
+                        }
+                      >
+                        Code
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          'rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] transition',
+                          isMarkdownCell
+                            ? theme === 'dark'
+                              ? 'bg-[#f6f24a]/15 text-[#f6f24a]'
+                              : 'bg-[#fff4bf] text-[#7a6500]'
+                            : theme === 'dark'
+                              ? 'bg-white/5 text-white/55 hover:bg-white/10'
+                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200',
+                        )}
+                        onClick={() =>
+                          updateNotebookCells((cells) =>
+                            cells.map((item) => (item.id === cell.id ? { ...item, kind: 'markdown' } : item)),
+                          )
+                        }
+                      >
+                        Markdown
+                      </button>
+                    </div>
                   </div>
                   <div className="ml-4 flex flex-wrap items-center justify-end gap-2">
                     <button
@@ -1178,7 +1279,7 @@ export function EngineLabPage() {
                     </button>
                     <Button
                       tone="ghost"
-                      disabled={!selectedEngine?.available || runNotebookMutation.isPending || createNotebookMutation.isPending || updateNotebookMutation.isPending || Boolean(cellActionState)}
+                      disabled={isMarkdownCell || !selectedEngine?.available || runNotebookMutation.isPending || createNotebookMutation.isPending || updateNotebookMutation.isPending || Boolean(cellActionState)}
                       onClick={() => {
                         void handleRunCellAction(cell.id, 'single')
                       }}
@@ -1188,7 +1289,7 @@ export function EngineLabPage() {
                     </Button>
                     <Button
                       tone="ghost"
-                      disabled={!selectedEngine?.available || runNotebookMutation.isPending || createNotebookMutation.isPending || updateNotebookMutation.isPending || Boolean(cellActionState)}
+                      disabled={isMarkdownCell || !selectedEngine?.available || runNotebookMutation.isPending || createNotebookMutation.isPending || updateNotebookMutation.isPending || Boolean(cellActionState)}
                       onClick={() => {
                         void handleRunCellAction(cell.id, 'from_here')
                       }}
@@ -1208,23 +1309,49 @@ export function EngineLabPage() {
                   </div>
                 </div>
 
-                <MonacoSqlEditor
-                  value={cell.code}
-                  onChange={(value) =>
-                    setDraftNotebook((current) =>
-                      current
-                        ? {
-                            ...current,
-                            cells_json: current.cells_json.map((item) => (item.id === cell.id ? { ...item, code: value } : item)),
-                          }
-                        : current,
-                    )
-                  }
-                  height={240}
-                  language={selectedEngine?.runtime_language === 'python' ? 'python' : 'sql'}
-                />
+                {isMarkdownCell ? (
+                  <div className="space-y-4 px-5 py-5">
+                    <Textarea
+                      rows={10}
+                      value={cell.code}
+                      onChange={(event) =>
+                        setDraftNotebook((current) =>
+                          current
+                            ? {
+                                ...current,
+                                cells_json: current.cells_json.map((item) => (item.id === cell.id ? { ...item, code: event.target.value } : item)),
+                              }
+                            : current,
+                        )
+                      }
+                      placeholder="# Title&#10;&#10;Write notes, assumptions, or analysis for this notebook section."
+                    />
+                    <div className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-white/[0.03]' : 'border-slate-200 bg-slate-50')}>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Rendered Markdown</p>
+                      <div className="mt-4 space-y-3">
+                        {renderMarkdownBlocks(cell.code)}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <MonacoSqlEditor
+                    value={cell.code}
+                    onChange={(value) =>
+                      setDraftNotebook((current) =>
+                        current
+                          ? {
+                              ...current,
+                              cells_json: current.cells_json.map((item) => (item.id === cell.id ? { ...item, code: value } : item)),
+                            }
+                          : current,
+                      )
+                    }
+                    height={240}
+                    language={selectedEngine?.runtime_language === 'python' ? 'python' : 'sql'}
+                  />
+                )}
 
-                {result ? (
+                {result && !isMarkdownCell ? (
                   <div className={cn('space-y-4 border-t px-5 py-5', theme === 'dark' ? 'border-white/10' : 'border-slate-100')}>
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>

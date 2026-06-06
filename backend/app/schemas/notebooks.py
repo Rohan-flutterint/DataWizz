@@ -9,6 +9,7 @@ from app.schemas.tables import DeltaTableRead
 class NotebookCell(BaseModel):
     id: str = Field(min_length=1)
     title: str | None = None
+    kind: str = Field(default="code", pattern="^(code|markdown)$")
     code: str = Field(min_length=1)
 
 
