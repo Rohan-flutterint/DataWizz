@@ -74,6 +74,21 @@ class CatalogMetadataService:
         payload.update(self.get_metadata(table))
         return payload
 
+    def attach_governance(self, enriched_table: dict, governance: dict) -> dict:
+        payload = dict(enriched_table)
+        payload.update(
+            {
+                "governance_score": governance.get("score"),
+                "governance_grade": governance.get("grade"),
+                "governance_status": governance.get("status"),
+                "governance_summary": governance.get("summary"),
+                "governance_strengths": governance.get("strengths", []),
+                "governance_gaps": governance.get("gaps", []),
+                "governance_breakdown": governance.get("breakdown", []),
+            }
+        )
+        return payload
+
     def update_metadata(self, table: DeltaTable, *, owner: str | None, tags: list[str] | None, lineage_hint: str | None) -> dict:
         registry = self._load_registry()
         current = registry.get(table.id, {})

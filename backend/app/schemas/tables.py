@@ -19,6 +19,13 @@ class DeltaTableRead(TimestampedModel):
     tags: list[str] | None = None
     freshness_status: str | None = None
     lineage_hint: str | None = None
+    governance_score: int | None = None
+    governance_grade: str | None = None
+    governance_status: str | None = None
+    governance_summary: str | None = None
+    governance_strengths: list[str] | None = None
+    governance_gaps: list[str] | None = None
+    governance_breakdown: list[dict] | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 
