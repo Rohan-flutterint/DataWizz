@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from app.api.dependencies import require_roles
 from app.db.session import get_db
 from app.models.catalog import DeltaTable, UploadedFile
-from app.models.notebook import NotebookArtifact, NotebookDocument, NotebookRun
+from app.models.notebook import NotebookArtifact, NotebookDocument, NotebookRun, NotebookSnippet
 from app.schemas.common import ApiMessage
 from app.schemas.engines import EngineCatalogResponse, NotebookExecutionRequest, NotebookExecutionResponse
 from app.schemas.notebooks import (
@@ -27,6 +27,9 @@ from app.schemas.notebooks import (
     NotebookDocumentUpdateRequest,
     NotebookListResponse,
     NotebookRunExecutionResponse,
+    NotebookSnippetCreateRequest,
+    NotebookSnippetListResponse,
+    NotebookSnippetRead,
 )
 from app.services.delta_service import DeltaService
 from app.services.execution_engine_service import execution_engine_service
@@ -59,10 +62,76 @@ def _resolve_notebook_name(db: Session, proposed_name: str, exclude_id: str | No
         suffix += 1
 
 
+def _resolve_snippet_name(db: Session, proposed_name: str, exclude_id: str | None = None) -> str:
+    base_name = proposed_name.strip() or "Untitled Snippet"
+    candidate = base_name
+    suffix = 2
+    while True:
+        query = db.query(NotebookSnippet).filter(NotebookSnippet.name == candidate)
+        if exclude_id:
+            query = query.filter(NotebookSnippet.id != exclude_id)
+        if query.one_or_none() is None:
+            return candidate
+        candidate = f"{base_name} ({suffix})"
+        suffix += 1
+
+
 @router.get("/notebooks", response_model=NotebookListResponse)
 def list_notebooks(db: Session = Depends(get_db)) -> NotebookListResponse:
     items = db.query(NotebookDocument).order_by(desc(NotebookDocument.updated_at)).all()
     return NotebookListResponse(items=items)
+
+
+@router.get("/notebooks/snippets", response_model=NotebookSnippetListResponse)
+def list_notebook_snippets(db: Session = Depends(get_db)) -> NotebookSnippetListResponse:
+    items = (
+        db.query(NotebookSnippet)
+        .order_by(desc(NotebookSnippet.is_template), desc(NotebookSnippet.updated_at))
+        .all()
+    )
+    return NotebookSnippetListResponse(items=items)
+
+
+@router.post(
+    "/notebooks/snippets",
+    response_model=NotebookSnippetRead,
+    dependencies=[Depends(require_roles("admin", "analyst"))],
+)
+def create_notebook_snippet(
+    payload: NotebookSnippetCreateRequest,
+    db: Session = Depends(get_db),
+) -> NotebookSnippetRead:
+    record = NotebookSnippet(
+        name=_resolve_snippet_name(db, payload.name),
+        description=payload.description,
+        category=payload.category.strip() or "general",
+        engine_scope=payload.engine_scope.strip() or "all",
+        cell_kind=payload.cell_kind,
+        code=payload.code,
+        is_template=payload.is_template,
+    )
+    db.add(record)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A snippet with this name already exists. Please try again.") from exc
+    db.refresh(record)
+    return record
+
+
+@router.delete(
+    "/notebooks/snippets/{snippet_id}",
+    response_model=ApiMessage,
+    dependencies=[Depends(require_roles("admin", "analyst"))],
+)
+def delete_notebook_snippet(snippet_id: str, db: Session = Depends(get_db)) -> ApiMessage:
+    snippet = db.query(NotebookSnippet).filter(NotebookSnippet.id == snippet_id).one_or_none()
+    if snippet is None:
+        raise HTTPException(status_code=404, detail="Notebook snippet not found")
+    db.delete(snippet)
+    db.commit()
+    return ApiMessage(message="Notebook snippet deleted successfully")
 
 
 @router.post("/notebooks", response_model=NotebookDocumentRead, dependencies=[Depends(require_roles("admin", "analyst"))])

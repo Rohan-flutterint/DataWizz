@@ -1,7 +1,7 @@
 from app.models.auth import User, UserSession
 from app.models.bi import Chart, Dashboard, DashboardWidget, ReportSchedule, ReportSnapshot, SemanticDataset
 from app.models.catalog import DeltaTable, QueryHistory, UploadedFile
-from app.models.notebook import NotebookArtifact, NotebookDocument, NotebookRun
+from app.models.notebook import NotebookArtifact, NotebookDocument, NotebookRun, NotebookSnippet
 from app.models.pipeline import JobLog, Pipeline, PipelineRun
 
 __all__ = [
@@ -13,6 +13,7 @@ __all__ = [
     "NotebookDocument",
     "NotebookRun",
     "NotebookArtifact",
+    "NotebookSnippet",
     "Pipeline",
     "PipelineRun",
     "JobLog",
