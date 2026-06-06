@@ -14,8 +14,25 @@ function signalTone(signal: string) {
   const normalized = signal.toLowerCase()
   if (normalized.includes('no missing') || normalized.includes('complete')) return 'bg-emerald-50 text-emerald-700'
   if (normalized.includes('blank') || normalized.includes('missing')) return 'bg-amber-50 text-amber-700'
-  if (normalized.includes('constant') || normalized.includes('high-cardinality') || normalized.includes('empty')) return 'bg-rose-50 text-rose-700'
+  if (normalized.includes('duplicate') || normalized.includes('constant') || normalized.includes('high-cardinality') || normalized.includes('empty')) return 'bg-rose-50 text-rose-700'
   return 'bg-slate-100 text-slate-700'
+}
+
+function cardinalityTone(band: FileColumnProfile['cardinality_band']) {
+  switch (band) {
+    case 'unique':
+      return 'bg-cyan-50 text-lagoon'
+    case 'high':
+      return 'bg-violet-50 text-violet-700'
+    case 'medium':
+      return 'bg-amber-50 text-amber-700'
+    case 'low':
+      return 'bg-slate-100 text-slate-700'
+    case 'constant':
+      return 'bg-rose-50 text-rose-700'
+    default:
+      return 'bg-slate-100 text-slate-500'
+  }
 }
 
 function profileValue(profile: FileColumnProfile) {
@@ -32,6 +49,11 @@ function profileValue(profile: FileColumnProfile) {
     return profile.sample_values.join(' · ')
   }
   return 'No representative values'
+}
+
+function topValuesLabel(profile: FileColumnProfile) {
+  if (!profile.top_values.length) return 'No repeated values detected'
+  return profile.top_values.map((item) => `${item.value} (${formatNumber(item.count)})`).join(' · ')
 }
 
 export function FileExplorerPage() {
@@ -270,10 +292,16 @@ export function FileExplorerPage() {
                   <div className="rounded-2xl bg-slate-50 p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Rows</p>
                     <p className="mt-2 font-display text-2xl text-ink">{formatNumber(previewQuery.data.profile_summary.total_rows)}</p>
+                    <p className="mt-1 text-xs text-slate/65">
+                      {formatNumber(previewQuery.data.profile_summary.distinct_rows)} distinct rows
+                    </p>
                   </div>
                   <div className="rounded-2xl bg-slate-50 p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Columns</p>
                     <p className="mt-2 font-display text-2xl text-ink">{formatNumber(previewQuery.data.profile_summary.total_columns)}</p>
+                    <p className="mt-1 text-xs text-slate/65">
+                      {formatNumber(previewQuery.data.profile_summary.completeness_ratio, 1)}% complete
+                    </p>
                   </div>
                   <div className="rounded-2xl bg-slate-50 p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Null Cells</p>
@@ -283,18 +311,25 @@ export function FileExplorerPage() {
                     </p>
                   </div>
                   <div className="rounded-2xl bg-slate-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Quality Signals</p>
-                    <p className="mt-2 font-display text-2xl text-ink">{formatNumber(previewQuery.data.profile_summary.quality_indicators.length)}</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Duplicate Rows</p>
+                    <p className="mt-2 font-display text-2xl text-ink">{formatNumber(previewQuery.data.profile_summary.duplicate_rows)}</p>
                     <p className="mt-1 text-xs text-slate/65">
-                      {formatNumber(previewQuery.data.profile_summary.columns_with_blank_values)} columns with blank strings
+                      {formatNumber(previewQuery.data.profile_summary.duplicate_ratio, 1)}% duplicate rate
                     </p>
                   </div>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-2xl bg-slate-50 p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Storage Path</p>
                     <p className="mt-2 text-sm text-ink">{previewQuery.data.file.storage_path}</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Blank Cells</p>
+                    <p className="mt-2 text-sm font-semibold text-ink">{formatNumber(previewQuery.data.profile_summary.total_blank_cells)}</p>
+                    <p className="mt-1 text-xs text-slate/65">
+                      {formatNumber(previewQuery.data.profile_summary.columns_with_blank_values)} columns with blank strings
+                    </p>
                   </div>
                   <div className="rounded-2xl bg-cyan-50 p-4 text-lagoon">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-lagoon/70">Profile Status</p>
@@ -340,6 +375,10 @@ export function FileExplorerPage() {
                             <p className="mt-2 text-sm font-semibold text-ink">{formatNumber(profile.null_count)}</p>
                           </div>
                           <div className="rounded-2xl bg-white px-3 py-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate/50">Unique %</p>
+                            <p className="mt-2 text-sm font-semibold text-ink">{formatNumber(profile.uniqueness_ratio, 1)}%</p>
+                          </div>
+                          <div className="rounded-2xl bg-white px-3 py-3">
                             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate/50">Distinct</p>
                             <p className="mt-2 text-sm font-semibold text-ink">{formatNumber(profile.distinct_count)}</p>
                           </div>
@@ -358,6 +397,18 @@ export function FileExplorerPage() {
                           {profile.avg_value !== null && profile.avg_value !== undefined ? (
                             <p className="mt-2 text-xs text-slate/60">Average: {formatNumber(profile.avg_value, 2)}</p>
                           ) : null}
+                          {profile.stddev_value !== null && profile.stddev_value !== undefined ? (
+                            <p className="mt-1 text-xs text-slate/60">Std dev: {formatNumber(profile.stddev_value, 2)}</p>
+                          ) : null}
+                        </div>
+                        <div className="mt-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate/50">Top values</p>
+                            <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${cardinalityTone(profile.cardinality_band)}`}>
+                              {profile.cardinality_band}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-sm leading-6 text-slate/75">{topValuesLabel(profile)}</p>
                         </div>
                         <div className="mt-4 flex flex-wrap gap-2">
                           {profile.quality_indicators.map((signal) => (
