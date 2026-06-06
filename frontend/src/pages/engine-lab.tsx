@@ -6,6 +6,7 @@ import { MonacoSqlEditor } from '../components/monaco-sql-editor'
 import { Button, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
 import { useExecutionEngine } from '../engine/engine-context'
 import { saveNotebookChartHandoff } from '../lib/chart-handoff'
+import { saveNotebookDatasetHandoff } from '../lib/dataset-handoff'
 import { api } from '../lib/api'
 import { cn, formatDate } from '../lib/utils'
 import { useTheme } from '../theme/theme-context'
@@ -96,6 +97,17 @@ function toArtifactName(...parts: Array<string | null | undefined>) {
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '')
   return value || 'notebook_output'
+}
+
+function inferNotebookSchemaFromResult(result: NotebookCellRunResult) {
+  return result.columns.map((column) => {
+    const sample = result.rows.find((row) => row[column] !== null && row[column] !== undefined)?.[column]
+    let type = 'string'
+    if (typeof sample === 'number') type = Number.isInteger(sample) ? 'int64' : 'double'
+    else if (typeof sample === 'boolean') type = 'boolean'
+    else if (sample instanceof Date) type = 'timestamp'
+    return { name: column, type }
+  })
 }
 
 function renderMarkdownBlocks(markdown: string) {
@@ -432,6 +444,28 @@ export function EngineLabPage() {
       rows: result.rows,
     })
     navigate('/bi/charts/new?source=notebook')
+  }
+
+  const handoffCellResultToDatasetExplorer = (cell: NotebookCell, result: NotebookCellRunResult) => {
+    if (!result.rows.length || !result.columns.length) {
+      setRunError('This cell does not have tabular output yet, so there is nothing to hand off to Dataset Explorer.')
+      return
+    }
+    const cellIndex = activeNotebook?.cells_json.findIndex((item) => item.id === cell.id) ?? -1
+    const fallbackCellTitle = cellIndex >= 0 ? `Cell ${cellIndex + 1}` : 'Notebook Cell'
+    const baseLabel = cell.title?.trim() || fallbackCellTitle
+    saveNotebookDatasetHandoff({
+      source: 'notebook',
+      notebookName: activeNotebook?.name ?? 'Notebook',
+      cellId: cell.id,
+      cellTitle: cell.title,
+      datasetName: `${baseLabel.replace(/[^a-z0-9_]+/gi, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'notebook_result'}_dataset`,
+      description: `Notebook snapshot dataset from ${activeNotebook?.name ?? 'Notebook'}${cell.title ? ` · ${cell.title}` : ''}`,
+      columns: result.columns,
+      rows: result.rows,
+      schema_json: inferNotebookSchemaFromResult(result),
+    })
+    navigate('/bi/datasets?source=notebook')
   }
 
   const handleRunNotebook = async () => {
@@ -1588,6 +1622,13 @@ export function EngineLabPage() {
                           disabled={!result.rows.length}
                         >
                           Open in Chart Builder
+                        </Button>
+                        <Button
+                          tone="ghost"
+                          onClick={() => handoffCellResultToDatasetExplorer(cell, result)}
+                          disabled={!result.rows.length}
+                        >
+                          Open in Dataset Explorer
                         </Button>
                         <Button tone="ghost" onClick={() => toggleOutputCollapsed(cell.id)}>
                           {outputCollapsed ? (

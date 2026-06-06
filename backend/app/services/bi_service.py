@@ -99,6 +99,23 @@ class BiService:
             "schema_json": preview["schema"],
         }
 
+    def preview_notebook_snapshot_source(self, dataset: SemanticDataset, limit: int = 50) -> dict:
+        config = dataset.source_config_json or {}
+        rows = config.get("snapshot_rows") if isinstance(config, dict) else []
+        columns = config.get("snapshot_columns") if isinstance(config, dict) else []
+        schema_json = config.get("snapshot_schema") if isinstance(config, dict) else []
+
+        safe_rows = rows if isinstance(rows, list) else []
+        safe_columns = [str(item) for item in columns] if isinstance(columns, list) else []
+        safe_schema = schema_json if isinstance(schema_json, list) else (dataset.schema_json or [])
+
+        return {
+            "columns": safe_columns,
+            "rows": safe_rows[:limit],
+            "row_count": len(safe_rows),
+            "schema_json": safe_schema,
+        }
+
     def preview_chart(self, db: Session, sql: str, limit: int = 200) -> dict:
         result = self.duckdb_service.execute_query(
             sql,

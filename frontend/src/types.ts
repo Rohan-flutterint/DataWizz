@@ -261,6 +261,7 @@ export type SemanticDataset = {
   name: string
   source_type: string
   source_ref: string
+  source_config_json?: Record<string, unknown>
   description?: string
   schema_json?: { name: string; type: string }[]
   metrics_json?: Record<string, unknown>[]
