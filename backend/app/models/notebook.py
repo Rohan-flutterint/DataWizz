@@ -45,3 +45,15 @@ class NotebookArtifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     download_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class NotebookSnippet(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "notebook_snippets"
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(String(64), nullable=False, default="general")
+    engine_scope: Mapped[str] = mapped_column(String(64), nullable=False, default="all")
+    cell_kind: Mapped[str] = mapped_column(String(32), nullable=False, default="code")
+    code: Mapped[str] = mapped_column(Text, nullable=False)
+    is_template: Mapped[bool] = mapped_column(default=False, nullable=False)

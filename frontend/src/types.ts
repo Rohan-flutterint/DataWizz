@@ -558,6 +558,19 @@ export type NotebookCellActionExecution = {
   start_cell_id: string
 }
 
+export type NotebookSnippet = {
+  id: string
+  name: string
+  description?: string
+  category: string
+  engine_scope: string
+  cell_kind: 'code' | 'markdown'
+  code: string
+  is_template: boolean
+  created_at: string
+  updated_at: string
+}
+
 export type ReportSchedule = {
   id: string
   name: string

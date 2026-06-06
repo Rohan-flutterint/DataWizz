@@ -9,7 +9,7 @@ import { saveNotebookChartHandoff } from '../lib/chart-handoff'
 import { api } from '../lib/api'
 import { cn, formatDate } from '../lib/utils'
 import { useTheme } from '../theme/theme-context'
-import type { DeltaTable, ExecutionEngine, NotebookArtifact, NotebookCell, NotebookCellRunResult, NotebookDocument, UploadedFile } from '../types'
+import type { DeltaTable, ExecutionEngine, NotebookArtifact, NotebookCell, NotebookCellRunResult, NotebookDocument, NotebookSnippet, UploadedFile } from '../types'
 import { useNavigate } from 'react-router-dom'
 
 function capabilityPill(enabled: boolean, label: string, theme: 'light' | 'dark') {
@@ -70,6 +70,21 @@ function buildWriteDeltaHelperSnippet(engineId: string) {
     return `SELECT *\nFROM sales_curated\nLIMIT 25`
   }
   return `write_info = write_delta(\n    result=result,\n    table_name="curated_notebook_output",\n    mode="overwrite",\n)\nprint(write_info["table"]["name"])`
+}
+
+function inferSnippetCategory(cell: NotebookCell, engine: ExecutionEngine | null) {
+  if ((cell.kind || 'code') === 'markdown') {
+    return 'notes'
+  }
+  if (engine?.runtime_language === 'python') {
+    return 'python'
+  }
+  return 'sql'
+}
+
+function toSnippetDefaultName(cell: NotebookCell, cellIndex: number, entryKind: 'snippet' | 'template') {
+  const baseName = cell.title?.trim() || `Cell ${cellIndex + 1}`
+  return `${baseName} ${entryKind === 'template' ? 'Template' : 'Snippet'}`
 }
 
 function toArtifactName(...parts: Array<string | null | undefined>) {
@@ -152,6 +167,7 @@ export function EngineLabPage() {
     queryFn: () => api.getNotebook(selectedNotebookId as string),
     enabled: Boolean(selectedNotebookId),
   })
+  const notebookSnippetsQuery = useQuery({ queryKey: ['notebook-snippets'], queryFn: api.listNotebookSnippets })
   const filesQuery = useQuery({ queryKey: ['files'], queryFn: api.listFiles })
   const tablesQuery = useQuery({ queryKey: ['tables'], queryFn: api.listTables })
 
@@ -215,6 +231,12 @@ export function EngineLabPage() {
   const runFromCellMutation = useMutation({
     mutationFn: ({ notebookId, cellId }: { notebookId: string; cellId: string }) => api.runNotebookFromCell(notebookId, cellId),
   })
+  const createNotebookSnippetMutation = useMutation({
+    mutationFn: api.createNotebookSnippet,
+  })
+  const deleteNotebookSnippetMutation = useMutation({
+    mutationFn: api.deleteNotebookSnippet,
+  })
   const duplicateNotebookMutation = useMutation({
     mutationFn: api.duplicateNotebook,
   })
@@ -231,6 +253,7 @@ export function EngineLabPage() {
   const targetableCells = activeNotebook?.cells_json ?? []
   const rawAssets = filesQuery.data?.items ?? []
   const curatedAssets = tablesQuery.data?.items ?? []
+  const snippetLibrary = notebookSnippetsQuery.data?.items ?? []
 
   const resetNotebookDraft = (engineOverride?: ExecutionEngine | null) => {
     setSelectedNotebookId(null)
@@ -300,18 +323,19 @@ export function EngineLabPage() {
     }
   }
 
-  const insertSnippetIntoNotebook = (snippet: string, title: string) => {
+  const insertSnippetIntoNotebook = (snippet: string, title: string, cellKind: 'code' | 'markdown' = 'code') => {
     setRunError(null)
     setRunFeedback(null)
     setDraftNotebook((current) => {
       if (!current) return current
       const target = current.cells_json.find((cell) => cell.id === assetTargetCellId)
-      if (assetTargetCellId === 'new' || !target || (target.kind || 'code') === 'markdown') {
-        const nextCell = createCell(snippet, title)
+      const targetKind = target?.kind || 'code'
+      if (assetTargetCellId === 'new' || !target || targetKind !== cellKind) {
+        const nextCell = cellKind === 'markdown' ? createMarkdownCell(snippet, title) : createCell(snippet, title)
         setAssetTargetCellId(nextCell.id)
         setRunFeedback(
-          target && (target.kind || 'code') === 'markdown'
-            ? `Inserted ${title} into a new code cell because the selected target is a markdown cell.`
+          target && targetKind !== cellKind
+            ? `Inserted ${title} into a new ${cellKind} cell because the selected target is a ${targetKind} cell.`
             : `Inserted ${title} into a new notebook cell.`,
         )
         return {
@@ -323,7 +347,7 @@ export function EngineLabPage() {
       setRunFeedback(`Inserted ${title} into ${target?.title || 'the selected cell'}.`)
       return {
         ...current,
-        cells_json: current.cells_json.map((cell) => (cell.id === assetTargetCellId ? { ...cell, code: nextCode } : cell)),
+        cells_json: current.cells_json.map((cell) => (cell.id === assetTargetCellId ? { ...cell, code: nextCode, kind: cellKind } : cell)),
       }
     })
   }
@@ -333,11 +357,52 @@ export function EngineLabPage() {
       selectedEngine?.runtime_language === 'python'
         ? buildNotebookPythonSnippet(activeEngineId, sourceName, mode)
         : buildNotebookSqlSnippet(sourceName, mode)
-    insertSnippetIntoNotebook(snippet, `${label} ${mode === 'preview' ? 'preview' : 'row count'} snippet`)
+    insertSnippetIntoNotebook(snippet, `${label} ${mode === 'preview' ? 'preview' : 'row count'} snippet`, 'code')
   }
 
   const insertHelperSnippet = (title: string, snippet: string) => {
-    insertSnippetIntoNotebook(snippet, title)
+    insertSnippetIntoNotebook(snippet, title, 'code')
+  }
+
+  const insertSavedLibraryEntry = (entry: NotebookSnippet) => {
+    insertSnippetIntoNotebook(entry.code, entry.name, entry.cell_kind)
+  }
+
+  const handleSaveCellLibraryEntry = async (cell: NotebookCell, cellIndex: number, entryKind: 'snippet' | 'template') => {
+    const suggestedName = toSnippetDefaultName(cell, cellIndex, entryKind)
+    const proposedName = window.prompt(entryKind === 'template' ? 'Template name' : 'Snippet name', suggestedName)?.trim()
+    if (!proposedName) return
+    setRunError(null)
+    setRunFeedback(null)
+    try {
+      const savedEntry = await createNotebookSnippetMutation.mutateAsync({
+        name: proposedName,
+        description: `${entryKind === 'template' ? 'Reusable template' : 'Reusable snippet'} from ${activeNotebook?.name ?? selectedEngine?.label ?? 'Engine Lab'}`,
+        category: inferSnippetCategory(cell, selectedEngine),
+        engine_scope: activeEngineId || 'all',
+        cell_kind: (cell.kind || 'code') as 'code' | 'markdown',
+        code: cell.code,
+        is_template: entryKind === 'template',
+      })
+      await queryClient.invalidateQueries({ queryKey: ['notebook-snippets'] })
+      setRunFeedback(`${savedEntry.name} saved to the reusable ${entryKind} library.`)
+    } catch (error) {
+      setRunError((error as Error).message)
+    }
+  }
+
+  const handleDeleteSnippet = async (entry: NotebookSnippet) => {
+    const confirmed = window.confirm(`Delete ${entry.name} from the reusable library?`)
+    if (!confirmed) return
+    setRunError(null)
+    setRunFeedback(null)
+    try {
+      await deleteNotebookSnippetMutation.mutateAsync(entry.id)
+      await queryClient.invalidateQueries({ queryKey: ['notebook-snippets'] })
+      setRunFeedback(`Removed ${entry.name} from the reusable library.`)
+    } catch (error) {
+      setRunError((error as Error).message)
+    }
   }
 
   const handoffCellResultToChartBuilder = (cell: NotebookCell, result: NotebookCellRunResult) => {
@@ -486,6 +551,9 @@ export function EngineLabPage() {
 
   const activeNotebookRuns = notebookDetailQuery.data?.recent_runs ?? []
   const activeNotebookArtifacts = notebookDetailQuery.data?.recent_artifacts ?? []
+  const filteredSnippetLibrary = snippetLibrary.filter((entry) => entry.engine_scope === 'all' || entry.engine_scope === activeEngineId)
+  const templateLibrary = filteredSnippetLibrary.filter((entry) => entry.is_template)
+  const snippetEntries = filteredSnippetLibrary.filter((entry) => !entry.is_template)
 
   const downloadArtifactFromHistory = async (artifact: NotebookArtifact) => {
     try {
@@ -1150,6 +1218,113 @@ export function EngineLabPage() {
             </div>
           </Panel>
 
+          <Panel>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Reusable Library</p>
+                <h3 className="mt-2 font-display text-2xl text-ink">Saved snippets and templates</h3>
+              </div>
+              <div className={cn('rounded-full px-3 py-1 text-xs font-semibold', theme === 'dark' ? 'bg-white/5 text-white/60' : 'bg-slate-100 text-slate/70')}>
+                {filteredSnippetLibrary.length} available for {selectedEngine?.label ?? 'this engine'}
+              </div>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-slate/75">
+              Save working notebook cells into a reusable library, then inject them into any future notebook without rebuilding the same setup each time.
+            </p>
+            <div className="mt-5 grid gap-4 xl:grid-cols-2">
+              <div className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-white/[0.03]' : 'border-slate-200 bg-slate-50')}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-ink">Templates</p>
+                    <p className="mt-1 text-sm text-slate/75">Longer starter cells and notebook scaffolds.</p>
+                  </div>
+                  <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em]', theme === 'dark' ? 'bg-[#f6f24a]/15 text-[#f6f24a]' : 'bg-[#fff4bf] text-[#7a6500]')}>
+                    {templateLibrary.length}
+                  </span>
+                </div>
+                <div className="mt-4 space-y-3">
+                  {templateLibrary.length ? templateLibrary.map((entry) => (
+                    <div key={entry.id} className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-white')}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-ink">{entry.name}</p>
+                          <p className="mt-1 text-sm text-slate/75">{entry.description || 'Reusable notebook template'}</p>
+                        </div>
+                        <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em]', theme === 'dark' ? 'bg-[#f6f24a]/15 text-[#f6f24a]' : 'bg-[#fff4bf] text-[#7a6500]')}>
+                          template
+                        </span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]', theme === 'dark' ? 'bg-white/5 text-white/60' : 'bg-slate-100 text-slate-500')}>
+                          {entry.category}
+                        </span>
+                        <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]', theme === 'dark' ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-100 text-lagoon')}>
+                          {entry.cell_kind}
+                        </span>
+                        <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]', theme === 'dark' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-700')}>
+                          {entry.engine_scope}
+                        </span>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <Button tone="ghost" onClick={() => insertSavedLibraryEntry(entry)}>
+                          Insert
+                        </Button>
+                        <Button tone="ghost" onClick={() => void handleDeleteSnippet(entry)} disabled={deleteNotebookSnippetMutation.isPending}>
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                  )) : <p className="text-sm text-slate/75">Save a cell as a template to build your reusable starter library.</p>}
+                </div>
+              </div>
+              <div className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-white/[0.03]' : 'border-slate-200 bg-slate-50')}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-ink">Snippets</p>
+                    <p className="mt-1 text-sm text-slate/75">Focused helpers for joins, profiling, notes, and repeatable queries.</p>
+                  </div>
+                  <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em]', theme === 'dark' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-700')}>
+                    {snippetEntries.length}
+                  </span>
+                </div>
+                <div className="mt-4 space-y-3">
+                  {snippetEntries.length ? snippetEntries.map((entry) => (
+                    <div key={entry.id} className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-white')}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-ink">{entry.name}</p>
+                          <p className="mt-1 text-sm text-slate/75">{entry.description || 'Reusable notebook snippet'}</p>
+                        </div>
+                        <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em]', theme === 'dark' ? 'bg-white/5 text-white/60' : 'bg-slate-100 text-slate-500')}>
+                          snippet
+                        </span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]', theme === 'dark' ? 'bg-white/5 text-white/60' : 'bg-slate-100 text-slate-500')}>
+                          {entry.category}
+                        </span>
+                        <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]', theme === 'dark' ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-100 text-lagoon')}>
+                          {entry.cell_kind}
+                        </span>
+                        <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]', theme === 'dark' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-700')}>
+                          {entry.engine_scope}
+                        </span>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <Button tone="ghost" onClick={() => insertSavedLibraryEntry(entry)}>
+                          Insert
+                        </Button>
+                        <Button tone="ghost" onClick={() => void handleDeleteSnippet(entry)} disabled={deleteNotebookSnippetMutation.isPending}>
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                  )) : <p className="text-sm text-slate/75">Save a code or markdown cell as a reusable snippet to start building your shared notebook kit.</p>}
+                </div>
+              </div>
+            </div>
+          </Panel>
+
           {activeNotebook?.cells_json?.map((cell, index) => {
             const result = cellResults[cell.id]
             const outputCollapsed = collapsedOutputs[cell.id] ?? false
@@ -1277,6 +1452,24 @@ export function EngineLabPage() {
                     >
                       <Copy className="h-4 w-4" />
                     </button>
+                    <Button
+                      tone="ghost"
+                      disabled={createNotebookSnippetMutation.isPending}
+                      onClick={() => {
+                        void handleSaveCellLibraryEntry(cell, index, 'snippet')
+                      }}
+                    >
+                      Save Snippet
+                    </Button>
+                    <Button
+                      tone="ghost"
+                      disabled={createNotebookSnippetMutation.isPending}
+                      onClick={() => {
+                        void handleSaveCellLibraryEntry(cell, index, 'template')
+                      }}
+                    >
+                      Save Template
+                    </Button>
                     <Button
                       tone="ghost"
                       disabled={isMarkdownCell || !selectedEngine?.available || runNotebookMutation.isPending || createNotebookMutation.isPending || updateNotebookMutation.isPending || Boolean(cellActionState)}

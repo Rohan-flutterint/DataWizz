@@ -26,6 +26,7 @@ class NotebookDocumentUpdateRequest(BaseModel):
     description: str | None = None
     cells_json: list[NotebookCell] = Field(default_factory=list)
 
+
 class NotebookCellExecutionResult(BaseModel):
     cell_id: str
     title: str | None = None
@@ -73,6 +74,26 @@ class NotebookArtifactRead(TimestampedModel):
     metadata_json: dict | None = None
 
 
+class NotebookSnippetCreateRequest(BaseModel):
+    name: str = Field(min_length=1)
+    description: str | None = None
+    category: str = Field(default="general", min_length=1)
+    engine_scope: str = Field(default="all", min_length=1)
+    cell_kind: str = Field(default="code", pattern="^(code|markdown)$")
+    code: str = Field(min_length=1)
+    is_template: bool = False
+
+
+class NotebookSnippetRead(TimestampedModel):
+    name: str
+    description: str | None = None
+    category: str
+    engine_scope: str
+    cell_kind: str
+    code: str
+    is_template: bool
+
+
 class NotebookListResponse(BaseModel):
     items: list[NotebookDocumentRead]
 
@@ -87,6 +108,10 @@ class NotebookRunExecutionResponse(BaseModel):
     notebook: NotebookDocumentRead
     run: NotebookRunRead
     cell_results: list[NotebookCellExecutionResult]
+
+
+class NotebookSnippetListResponse(BaseModel):
+    items: list[NotebookSnippetRead]
 
 
 class NotebookCellActionResponse(BaseModel):
