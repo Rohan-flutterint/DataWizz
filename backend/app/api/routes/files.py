@@ -65,6 +65,7 @@ def preview_file(file_id: str, db: Session = Depends(get_db)) -> FilePreviewResp
         rows=preview["rows"],
         profile_summary=preview["profile_summary"],
         column_profiles=preview["column_profiles"],
+        recommendations=preview["recommendations"],
     )
 
 

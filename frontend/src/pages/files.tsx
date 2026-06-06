@@ -8,7 +8,7 @@ import { Button, EmptyState, PageHeader, Panel } from '../components/ui'
 import { api } from '../lib/api'
 import { formatBytes, formatDate, formatNumber } from '../lib/utils'
 import { useTheme } from '../theme/theme-context'
-import type { FileColumnProfile, UploadedFile } from '../types'
+import type { FileColumnProfile, FileRecommendationItem, UploadedFile } from '../types'
 
 function signalTone(signal: string) {
   const normalized = signal.toLowerCase()
@@ -54,6 +54,67 @@ function profileValue(profile: FileColumnProfile) {
 function topValuesLabel(profile: FileColumnProfile) {
   if (!profile.top_values.length) return 'No repeated values detected'
   return profile.top_values.map((item) => `${item.value} (${formatNumber(item.count)})`).join(' · ')
+}
+
+function recommendationTone(confidence: FileRecommendationItem['confidence']) {
+  switch (confidence) {
+    case 'high':
+      return 'bg-emerald-50 text-emerald-700'
+    case 'medium':
+      return 'bg-amber-50 text-amber-700'
+    default:
+      return 'bg-slate-100 text-slate-700'
+  }
+}
+
+function RecommendationSection({
+  title,
+  subtitle,
+  items,
+  emptyState,
+}: {
+  title: string
+  subtitle: string
+  items: FileRecommendationItem[]
+  emptyState: string
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate/50">{title}</p>
+          <p className="mt-2 text-sm text-slate/70">{subtitle}</p>
+        </div>
+        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate">
+          {items.length}
+        </span>
+      </div>
+      {items.length ? (
+        <div className="mt-4 space-y-3">
+          {items.map((item) => (
+            <div key={`${title}-${item.column}`} className="rounded-2xl bg-white px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="break-words text-sm font-semibold text-ink">{item.column}</p>
+                  <p className="mt-1 text-xs text-slate/65">{item.label}</p>
+                </div>
+                <span className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${recommendationTone(item.confidence)}`}>
+                  {item.confidence}
+                </span>
+              </div>
+              <ul className="mt-3 space-y-1 text-sm leading-6 text-slate/75">
+                {item.reasons.map((reason) => (
+                  <li key={`${item.column}-${reason}`}>- {reason}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-4 text-sm text-slate/65">{emptyState}</p>
+      )}
+    </div>
+  )
 }
 
 export function FileExplorerPage() {
@@ -346,6 +407,60 @@ export function FileExplorerPage() {
                     </div>
                   </div>
                 </div>
+
+                <Panel className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Profile-Driven Recommendations</p>
+                      <h3 className="mt-2 font-display text-2xl text-ink">Suggested modeling and cleanup path</h3>
+                    </div>
+                    <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-lagoon">
+                      {previewQuery.data.recommendations.join_keys.length +
+                        previewQuery.data.recommendations.dimensions.length +
+                        previewQuery.data.recommendations.metrics.length +
+                        previewQuery.data.recommendations.time_columns.length}{' '}
+                      candidates
+                    </span>
+                  </div>
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <RecommendationSection
+                      title="Join Keys"
+                      subtitle="Fields that look stable enough to relate this file to other sources."
+                      items={previewQuery.data.recommendations.join_keys}
+                      emptyState="No strong relational key was inferred from the current sample."
+                    />
+                    <RecommendationSection
+                      title="Dimensions"
+                      subtitle="Good grouping columns for dashboards, filters, and semantic models."
+                      items={previewQuery.data.recommendations.dimensions}
+                      emptyState="No obvious low-cardinality dimensions were detected."
+                    />
+                    <RecommendationSection
+                      title="Metrics"
+                      subtitle="Numeric fields that look ready for aggregation in BI and curated tables."
+                      items={previewQuery.data.recommendations.metrics}
+                      emptyState="No numeric fields with analytical variation were detected."
+                    />
+                    <RecommendationSection
+                      title="Time Columns"
+                      subtitle="Date or timestamp fields that can anchor trend charts and freshness checks."
+                      items={previewQuery.data.recommendations.time_columns}
+                      emptyState="No date-oriented field was inferred automatically."
+                    />
+                  </div>
+                  <div className="rounded-2xl bg-cyan-50 p-4 text-lagoon">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-lagoon/70">Recommended Next Steps</p>
+                    {previewQuery.data.recommendations.quality_actions.length ? (
+                      <ul className="mt-3 space-y-2 text-sm leading-6">
+                        {previewQuery.data.recommendations.quality_actions.map((action) => (
+                          <li key={action}>- {action}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-3 text-sm">No urgent cleanup actions detected from the current file profile.</p>
+                    )}
+                  </div>
+                </Panel>
 
                 <Panel className="space-y-4">
                   <div className="flex items-center justify-between">

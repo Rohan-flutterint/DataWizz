@@ -52,12 +52,28 @@ export type FileColumnProfile = {
   quality_indicators: string[]
 }
 
+export type FileRecommendationItem = {
+  column: string
+  label: string
+  confidence: 'high' | 'medium' | 'low'
+  reasons: string[]
+}
+
+export type FileRecommendations = {
+  join_keys: FileRecommendationItem[]
+  dimensions: FileRecommendationItem[]
+  metrics: FileRecommendationItem[]
+  time_columns: FileRecommendationItem[]
+  quality_actions: string[]
+}
+
 export type FilePreview = {
   file: UploadedFile
   columns: string[]
   rows: Record<string, unknown>[]
   profile_summary: FileProfileSummary
   column_profiles: FileColumnProfile[]
+  recommendations: FileRecommendations
 }
 
 export type DeltaTable = {

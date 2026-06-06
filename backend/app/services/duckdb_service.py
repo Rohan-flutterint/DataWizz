@@ -67,7 +67,138 @@ class DuckDBService:
             return "low"
         if ratio < 0.5:
             return "medium"
-        return "high"
+            return "high"
+
+    def _looks_like_identifier(self, column_name: str) -> bool:
+        normalized = column_name.lower()
+        return normalized == "id" or normalized.endswith("_id") or normalized.endswith("id") or "key" in normalized or normalized.endswith("_code")
+
+    def _looks_like_time_column(self, column_name: str) -> bool:
+        normalized = column_name.lower()
+        return any(token in normalized for token in ["date", "time", "timestamp", "_ts", "_dt", "created_at", "updated_at"])
+
+    def _build_profile_recommendations(self, column_profiles: list[dict], profile_summary: dict) -> dict:
+        join_keys: list[dict] = []
+        dimensions: list[dict] = []
+        metrics: list[dict] = []
+        time_columns: list[dict] = []
+        quality_actions: list[str] = []
+
+        for profile in column_profiles:
+            family = profile["profile_kind"]
+            column_name = profile["name"]
+            completeness_ratio = float(profile["completeness_ratio"] or 0.0)
+            uniqueness_ratio = float(profile["uniqueness_ratio"] or 0.0)
+            distinct_count = int(profile["distinct_count"] or 0)
+            cardinality_band = profile["cardinality_band"]
+            blank_count = int(profile["blank_count"] or 0)
+            null_count = int(profile["null_count"] or 0)
+            stddev_value = profile["stddev_value"]
+            reasons: list[str] = []
+
+            if family in {"string", "other"} and self._looks_like_identifier(column_name) and uniqueness_ratio >= 85 and completeness_ratio >= 90:
+                reasons = [
+                    "column name suggests an identifier",
+                    f"{uniqueness_ratio:.1f}% of non-null values are distinct",
+                    f"{completeness_ratio:.1f}% completeness makes it stable for joins",
+                ]
+                join_keys.append(
+                    {
+                        "column": column_name,
+                        "label": "Likely join key",
+                        "confidence": "high" if uniqueness_ratio >= 97 and null_count == 0 else "medium",
+                        "reasons": reasons,
+                    }
+                )
+            elif family == "numeric" and self._looks_like_identifier(column_name) and uniqueness_ratio >= 95 and completeness_ratio >= 95:
+                join_keys.append(
+                    {
+                        "column": column_name,
+                        "label": "Possible numeric key",
+                        "confidence": "medium",
+                        "reasons": [
+                            "numeric field behaves like an identifier",
+                            f"{uniqueness_ratio:.1f}% of non-null values are distinct",
+                            f"{completeness_ratio:.1f}% completeness supports relational joins",
+                        ],
+                    }
+                )
+
+            if family in {"temporal"} or self._looks_like_time_column(column_name):
+                time_columns.append(
+                    {
+                        "column": column_name,
+                        "label": "Time axis candidate",
+                        "confidence": "high" if family == "temporal" else "medium",
+                        "reasons": [
+                            "column type or name indicates a date/time field",
+                            f"{completeness_ratio:.1f}% completeness supports trend analysis",
+                            f"observed range spans {profile['min_value'] or 'N/A'} to {profile['max_value'] or 'N/A'}",
+                        ],
+                    }
+                )
+
+            if family in {"string", "boolean"} and completeness_ratio >= 70 and cardinality_band in {"low", "medium", "constant"}:
+                dimension_reasons = [
+                    f"{cardinality_band} cardinality is useful for grouping and filtering",
+                    f"{completeness_ratio:.1f}% completeness supports slicing",
+                ]
+                if profile["top_values"]:
+                    dimension_reasons.append("frequent repeated values suggest category behavior")
+                dimensions.append(
+                    {
+                        "column": column_name,
+                        "label": "Likely dimension",
+                        "confidence": "high" if family == "boolean" or cardinality_band == "low" else "medium",
+                        "reasons": dimension_reasons,
+                    }
+                )
+
+            if family == "numeric" and distinct_count > 1 and not self._looks_like_identifier(column_name):
+                metric_reasons = [
+                    "numeric field can be aggregated in charts or semantic metrics",
+                    f"{distinct_count} distinct values indicate variation",
+                ]
+                if stddev_value is not None:
+                    metric_reasons.append(f"standard deviation of {stddev_value:.2f} shows distribution spread")
+                metrics.append(
+                    {
+                        "column": column_name,
+                        "label": "Likely metric",
+                        "confidence": "high" if completeness_ratio >= 85 and cardinality_band in {"medium", "high"} else "medium",
+                        "reasons": metric_reasons,
+                    }
+                )
+
+            if null_count > 0 and completeness_ratio < 90:
+                quality_actions.append(
+                    f"Review missing values in {column_name}: only {completeness_ratio:.1f}% complete."
+                )
+            if blank_count > 0:
+                quality_actions.append(
+                    f"Trim or standardize blank strings in {column_name} before modeling."
+                )
+            if profile["quality_indicators"] and "constant values" in profile["quality_indicators"]:
+                quality_actions.append(
+                    f"{column_name} is constant across the file and may not add analytical value."
+                )
+
+        if profile_summary["duplicate_rows"] > 0:
+            quality_actions.append(
+                f"Deduplicate {profile_summary['duplicate_rows']} repeated rows before publishing curated outputs."
+            )
+        if not join_keys:
+            quality_actions.append("No strong join key was detected automatically. Confirm relational keys before building joins.")
+        if not time_columns:
+            quality_actions.append("No clear time column was detected. Time-series dashboards may need a derived date field.")
+
+        return {
+            "join_keys": sorted(join_keys, key=lambda item: (item["confidence"] != "high", item["column"]))[:3],
+            "dimensions": sorted(dimensions, key=lambda item: (item["confidence"] != "high", item["column"]))[:4],
+            "metrics": sorted(metrics, key=lambda item: (item["confidence"] != "high", item["column"]))[:4],
+            "time_columns": sorted(time_columns, key=lambda item: (item["confidence"] != "high", item["column"]))[:3],
+            "quality_actions": list(dict.fromkeys(quality_actions))[:6],
+        }
 
     def _profile_column(
         self,
@@ -313,6 +444,22 @@ class DuckDBService:
                 quality_indicators.append("high-cardinality fields present")
             if duplicate_rows > 0:
                 quality_indicators.append("duplicate rows detected")
+            recommendations = self._build_profile_recommendations(
+                column_profiles=column_profiles,
+                profile_summary={
+                    "total_rows": row_count,
+                    "distinct_rows": distinct_rows,
+                    "duplicate_rows": duplicate_rows,
+                    "duplicate_ratio": duplicate_ratio,
+                    "total_columns": len(schema),
+                    "total_blank_cells": total_blank_cells,
+                    "null_cells": total_null_cells,
+                    "completeness_ratio": completeness_ratio,
+                    "columns_with_nulls": columns_with_nulls,
+                    "columns_with_blank_values": columns_with_blank_values,
+                    "quality_indicators": quality_indicators,
+                },
+            )
             return {
                 "columns": preview.column_names,
                 "rows": self._normalize_rows(preview.to_pylist()),
@@ -332,6 +479,7 @@ class DuckDBService:
                     "quality_indicators": quality_indicators,
                 },
                 "column_profiles": column_profiles,
+                "recommendations": recommendations,
             }
         finally:
             conn.close()
