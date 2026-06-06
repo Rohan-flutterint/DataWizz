@@ -91,6 +91,20 @@ export type DeltaTable = {
   tags?: string[]
   freshness_status?: string
   lineage_hint?: string
+  governance_score?: number
+  governance_grade?: string
+  governance_status?: string
+  governance_summary?: string
+  governance_strengths?: string[]
+  governance_gaps?: string[]
+  governance_breakdown?: {
+    key: string
+    label: string
+    max_points: number
+    earned_points: number
+    status: 'strong' | 'partial' | 'missing'
+    detail: string
+  }[]
   created_at: string
   updated_at: string
 }

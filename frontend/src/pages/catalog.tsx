@@ -15,6 +15,13 @@ function freshnessTone(status?: string) {
   return 'bg-slate-100 text-slate-700'
 }
 
+function governanceTone(status?: string) {
+  if (status === 'excellent' || status === 'healthy') return 'bg-emerald-50 text-emerald-700'
+  if (status === 'developing') return 'bg-amber-50 text-amber-700'
+  if (status === 'at_risk' || status === 'weak') return 'bg-rose-50 text-rose-700'
+  return 'bg-slate-100 text-slate-700'
+}
+
 function lineageGraphTone(theme: 'light' | 'dark', active: boolean) {
   if (theme === 'dark') {
     return active
@@ -133,7 +140,10 @@ export function CatalogPage() {
 
   const selectedTable = tables.find((table) => table.id === selectedTableId) ?? null
   const selectedLineage = lineageQuery.data
-  const freshTables = tables.filter((table) => table.freshness_status === 'fresh').length
+  const governedTables = tables.filter((table) => (table.governance_score ?? 0) >= 75).length
+  const averageGovernanceScore = tables.length
+    ? Math.round(tables.reduce((sum, table) => sum + (table.governance_score ?? 0), 0) / tables.length)
+    : 0
   const latestRefresh = tables
     .map((table) => table.last_refreshed_at ?? table.updated_at)
     .filter(Boolean)
@@ -233,8 +243,8 @@ export function CatalogPage() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Delta Tables" value={String(tables.length)} accent="bg-[#ffe2de]" subtext="Curated assets published into the lakehouse." />
-        <StatCard label="Schemas" value={String(schemaOptions.length - 1)} accent="bg-[#d8f1ff]" subtext="Logical namespaces available to analysts and pipelines." />
-        <StatCard label="Fresh Assets" value={String(freshTables)} accent="bg-[#e6f7eb]" subtext="Curated tables refreshed recently enough to be considered fresh." />
+        <StatCard label="Governed Assets" value={String(governedTables)} accent="bg-[#d8f1ff]" subtext="Assets scoring 75 or above on governance readiness." />
+        <StatCard label="Average Score" value={`${averageGovernanceScore}/100`} accent="bg-[#e6f7eb]" subtext="Average metadata, freshness, and lineage coverage across the catalog." />
         <StatCard label="Latest Refresh" value={latestRefresh ? formatDate(latestRefresh) : 'N/A'} accent="bg-[#fff4d6]" subtext="Most recently updated curated asset in the catalog." />
       </div>
 
@@ -328,6 +338,9 @@ export function CatalogPage() {
                           <span className={`rounded-full px-3 py-1 text-xs font-medium ${freshnessTone(table.freshness_status)}`}>
                             {table.freshness_status || 'unknown'}
                           </span>
+                          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${governanceTone(table.governance_status)}`}>
+                            Governance {table.governance_score ?? 0}/100
+                          </span>
                           {table.owner ? (
                             <span
                               className={`rounded-full px-3 py-1 text-xs font-medium ${
@@ -388,6 +401,9 @@ export function CatalogPage() {
                         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${freshnessTone(selectedTable.freshness_status)}`}>
                           {selectedTable.freshness_status || 'unknown'}
                         </span>
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${governanceTone(selectedTable.governance_status)}`}>
+                          Governance {selectedTable.governance_score ?? 0}/100 · Grade {selectedTable.governance_grade ?? 'N/A'}
+                        </span>
                         {selectedTable.tags?.map((tag) => (
                           <span key={tag} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
                             {tag}
@@ -431,6 +447,49 @@ export function CatalogPage() {
                     <div className="rounded-2xl bg-slate-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Owner</p>
                       <p className="mt-2 text-sm font-semibold text-ink">{selectedTable.owner || 'Unassigned'}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+                    <div className="rounded-2xl bg-cyan-50 p-4 text-lagoon">
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-lagoon/70">Governance Score</p>
+                      <div className="mt-3 flex items-end gap-3">
+                        <p className="font-display text-4xl">{selectedTable.governance_score ?? 0}</p>
+                        <p className="pb-1 text-sm font-semibold uppercase tracking-[0.18em]">
+                          Grade {selectedTable.governance_grade ?? 'N/A'}
+                        </p>
+                      </div>
+                      <p className="mt-3 text-sm leading-6">{selectedTable.governance_summary || 'Governance scoring will appear once metadata is evaluated.'}</p>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Strengths</p>
+                        {selectedTable.governance_strengths?.length ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {selectedTable.governance_strengths.map((item) => (
+                              <span key={item} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-3 text-sm text-slate/70">No standout governance strengths are recorded yet.</p>
+                        )}
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Gaps</p>
+                        {selectedTable.governance_gaps?.length ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {selectedTable.governance_gaps.map((item) => (
+                              <span key={item} className="rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-3 text-sm text-slate/70">No major governance gaps are currently flagged.</p>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -710,7 +769,7 @@ export function CatalogPage() {
                       <div className="flex items-start justify-between gap-4">
                         <div>
                           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Catalog Governance</p>
-                          <h3 className="mt-2 font-display text-2xl text-ink">Ownership, Tags, and Lineage</h3>
+                          <h3 className="mt-2 font-display text-2xl text-ink">Scoring Breakdown and Stewardship</h3>
                         </div>
                         {canEdit ? (
                           <Button
@@ -730,6 +789,26 @@ export function CatalogPage() {
                             {updateMetadataMutation.isPending ? 'Saving...' : 'Save Metadata'}
                           </Button>
                         ) : null}
+                      </div>
+                      <div className="grid gap-3">
+                        {(selectedTable.governance_breakdown ?? []).map((item) => (
+                          <div key={item.key} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <p className="font-semibold text-ink">{item.label}</p>
+                                <p className="mt-1 text-sm text-slate/70">{item.detail}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${item.status === 'strong' ? 'bg-emerald-50 text-emerald-700' : item.status === 'partial' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>
+                                  {item.status.replace('_', ' ')}
+                                </span>
+                                <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate">
+                                  {item.earned_points}/{item.max_points}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                       <fieldset className="grid gap-4" disabled={!canEdit}>
                         <div>
