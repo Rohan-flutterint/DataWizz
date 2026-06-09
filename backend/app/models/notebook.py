@@ -18,6 +18,16 @@ class NotebookDocument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class NotebookRevision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "notebook_revisions"
+
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False, default="save")
+    snapshot_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
 class NotebookRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "notebook_runs"
 

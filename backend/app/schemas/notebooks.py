@@ -60,6 +60,14 @@ class NotebookRunRead(TimestampedModel):
     run_summary: dict | None = None
 
 
+class NotebookRevisionRead(TimestampedModel):
+    notebook_id: str
+    version_number: int
+    action: str
+    snapshot_json: dict
+    summary_json: dict | None = None
+
+
 class NotebookArtifactRead(TimestampedModel):
     notebook_id: str
     notebook_run_id: str | None = None
@@ -100,6 +108,7 @@ class NotebookListResponse(BaseModel):
 
 class NotebookDetailResponse(BaseModel):
     notebook: NotebookDocumentRead
+    recent_revisions: list[NotebookRevisionRead]
     recent_runs: list[NotebookRunRead]
     recent_artifacts: list[NotebookArtifactRead]
 
@@ -137,3 +146,9 @@ class NotebookCellWriteDeltaRequest(BaseModel):
 class NotebookCellWriteDeltaResponse(BaseModel):
     message: str
     table: DeltaTableRead
+
+
+class NotebookRevisionRestoreResponse(BaseModel):
+    notebook: NotebookDocumentRead
+    revision: NotebookRevisionRead
+    message: str
