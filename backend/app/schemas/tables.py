@@ -26,6 +26,17 @@ class DeltaTableRead(TimestampedModel):
     governance_strengths: list[str] | None = None
     governance_gaps: list[str] | None = None
     governance_breakdown: list[dict] | None = None
+    contract_mode: str | None = None
+    contract_version: int | None = None
+    contract_schema_json: list[dict] | None = None
+    contract_required_columns: list[str] | None = None
+    contract_allow_additive_columns: bool | None = None
+    contract_allow_column_removal: bool | None = None
+    contract_allow_type_changes: bool | None = None
+    contract_last_check_status: str | None = None
+    contract_last_check_summary: str | None = None
+    contract_last_check_issues: list[str] | None = None
+    contract_last_check_at: datetime | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 
@@ -44,3 +55,12 @@ class DeltaTableMetadataUpdateRequest(BaseModel):
     owner: str | None = None
     tags: list[str] | None = None
     lineage_hint: str | None = None
+
+
+class DeltaTableContractUpdateRequest(BaseModel):
+    contract_mode: str = Field(default="warn", pattern="^(off|warn|strict)$")
+    contract_required_columns: list[str] | None = None
+    contract_allow_additive_columns: bool = True
+    contract_allow_column_removal: bool = False
+    contract_allow_type_changes: bool = False
+    adopt_current_schema: bool = False

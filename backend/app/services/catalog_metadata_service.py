@@ -44,17 +44,76 @@ class CatalogMetadataService:
             return "SQL workspace authored Delta table"
         return "Curated table with no retained lineage string"
 
+    def _default_contract(self, table: DeltaTable) -> dict:
+        schema_json = list(table.schema_json or [])
+        required_columns = [field.get("name") for field in schema_json if field.get("name")]
+        return {
+            "contract_mode": "warn",
+            "contract_version": 1,
+            "contract_schema_json": schema_json,
+            "contract_required_columns": required_columns,
+            "contract_allow_additive_columns": True,
+            "contract_allow_column_removal": False,
+            "contract_allow_type_changes": False,
+            "contract_last_check_status": "pass" if schema_json else "untracked",
+            "contract_last_check_summary": "Current table schema is being used as the baseline contract." if schema_json else "No contract baseline captured yet.",
+            "contract_last_check_issues": [],
+            "contract_last_check_at": None,
+        }
+
+    def get_contract(self, table: DeltaTable) -> dict:
+        registry = self._load_registry()
+        stored = registry.get(table.id, {})
+        default_contract = self._default_contract(table)
+        contract = {
+            "contract_mode": stored.get("contract_mode", default_contract["contract_mode"]),
+            "contract_version": stored.get("contract_version", default_contract["contract_version"]),
+            "contract_schema_json": stored.get("contract_schema_json", default_contract["contract_schema_json"]),
+            "contract_required_columns": stored.get("contract_required_columns", default_contract["contract_required_columns"]),
+            "contract_allow_additive_columns": stored.get(
+                "contract_allow_additive_columns",
+                default_contract["contract_allow_additive_columns"],
+            ),
+            "contract_allow_column_removal": stored.get(
+                "contract_allow_column_removal",
+                default_contract["contract_allow_column_removal"],
+            ),
+            "contract_allow_type_changes": stored.get(
+                "contract_allow_type_changes",
+                default_contract["contract_allow_type_changes"],
+            ),
+            "contract_last_check_status": stored.get(
+                "contract_last_check_status",
+                default_contract["contract_last_check_status"],
+            ),
+            "contract_last_check_summary": stored.get(
+                "contract_last_check_summary",
+                default_contract["contract_last_check_summary"],
+            ),
+            "contract_last_check_issues": stored.get(
+                "contract_last_check_issues",
+                default_contract["contract_last_check_issues"],
+            ),
+            "contract_last_check_at": stored.get(
+                "contract_last_check_at",
+                default_contract["contract_last_check_at"],
+            ),
+        }
+        return contract
+
     def get_metadata(self, table: DeltaTable) -> dict:
         registry = self._load_registry()
         stored = registry.get(table.id, {})
         default_tags = ["delta", table.schema_name, table.mode]
         tags = stored.get("tags") or default_tags
-        return {
+        payload = {
             "owner": stored.get("owner") or ("analytics_engineering" if table.schema_name == "analytics" else "data_platform"),
             "tags": tags,
             "freshness_status": stored.get("freshness_status") or self._default_freshness(table),
             "lineage_hint": stored.get("lineage_hint") or self._default_lineage_hint(table),
         }
+        payload.update(self.get_contract(table))
+        return payload
 
     def enrich_table(self, table: DeltaTable) -> dict:
         payload = {
@@ -107,3 +166,121 @@ class CatalogMetadataService:
         registry[table.id] = current
         self._save_registry(registry)
         return self.enrich_table(table)
+
+    def ensure_contract(self, table: DeltaTable) -> dict:
+        registry = self._load_registry()
+        current = registry.get(table.id, {})
+        if "contract_mode" not in current:
+            current.update(self._default_contract(table))
+            registry[table.id] = current
+            self._save_registry(registry)
+        return self.get_contract(table)
+
+    def update_contract(
+        self,
+        table: DeltaTable,
+        *,
+        contract_mode: str,
+        allow_additive_columns: bool,
+        allow_column_removal: bool,
+        allow_type_changes: bool,
+        required_columns: list[str] | None,
+        adopt_current_schema: bool,
+    ) -> dict:
+        registry = self._load_registry()
+        current = registry.get(table.id, {})
+        contract = self.get_contract(table)
+        current["contract_mode"] = contract_mode
+        current["contract_allow_additive_columns"] = allow_additive_columns
+        current["contract_allow_column_removal"] = allow_column_removal
+        current["contract_allow_type_changes"] = allow_type_changes
+        current["contract_required_columns"] = [column.strip() for column in (required_columns or []) if column and column.strip()]
+
+        if adopt_current_schema or not current.get("contract_schema_json"):
+            current["contract_schema_json"] = list(table.schema_json or [])
+            current["contract_version"] = int(contract.get("contract_version", 1)) + (1 if contract.get("contract_schema_json") else 0)
+            if not current["contract_required_columns"]:
+                current["contract_required_columns"] = [
+                    field.get("name") for field in (table.schema_json or []) if field.get("name")
+                ]
+            current["contract_last_check_status"] = "pass"
+            current["contract_last_check_summary"] = "Current schema adopted as the active contract baseline."
+            current["contract_last_check_issues"] = []
+            current["contract_last_check_at"] = datetime.now(timezone.utc).isoformat()
+        else:
+            current["contract_version"] = int(contract.get("contract_version", 1))
+
+        registry[table.id] = current
+        self._save_registry(registry)
+        return self.enrich_table(table)
+
+    def evaluate_contract(
+        self,
+        table: DeltaTable,
+        *,
+        proposed_schema_json: list[dict],
+    ) -> dict:
+        contract = self.get_contract(table)
+        contract_mode = contract.get("contract_mode") or "warn"
+        baseline_schema = list(contract.get("contract_schema_json") or table.schema_json or [])
+        required_columns = [column for column in (contract.get("contract_required_columns") or []) if column]
+        baseline_by_name = {field.get("name"): str(field.get("type")) for field in baseline_schema if field.get("name")}
+        proposed_by_name = {field.get("name"): str(field.get("type")) for field in proposed_schema_json if field.get("name")}
+
+        if contract_mode == "off":
+            return {
+                "status": "pass",
+                "summary": "Schema contract guardrails are disabled for this table.",
+                "issues": [],
+                "contract_mode": contract_mode,
+                "contract_version": contract.get("contract_version", 1),
+            }
+
+        issues: list[str] = []
+        missing_required = [column for column in required_columns if column not in proposed_by_name]
+        removed_columns = [column for column in baseline_by_name if column not in proposed_by_name]
+        additive_columns = [column for column in proposed_by_name if column not in baseline_by_name]
+        type_changes = [
+            f"{column}: {baseline_by_name[column]} -> {proposed_by_name[column]}"
+            for column in baseline_by_name
+            if column in proposed_by_name and baseline_by_name[column] != proposed_by_name[column]
+        ]
+
+        if missing_required:
+            issues.append(f"Missing required columns: {', '.join(missing_required)}.")
+        if removed_columns and not contract.get("contract_allow_column_removal", False):
+            issues.append(f"Removed contract columns: {', '.join(removed_columns)}.")
+        if additive_columns and not contract.get("contract_allow_additive_columns", True):
+            issues.append(f"Added non-approved columns: {', '.join(additive_columns)}.")
+        if type_changes and not contract.get("contract_allow_type_changes", False):
+            issues.append(f"Column type changes detected: {'; '.join(type_changes)}.")
+
+        if not issues:
+            summary = "Published schema satisfies the active table contract."
+            status = "pass"
+        elif contract_mode == "strict":
+            summary = f"Schema contract blocked this publish. {' '.join(issues)}"
+            status = "blocked"
+        else:
+            summary = f"Schema contract warnings recorded for this publish. {' '.join(issues)}"
+            status = "warning"
+
+        return {
+            "status": status,
+            "summary": summary,
+            "issues": issues,
+            "contract_mode": contract_mode,
+            "contract_version": contract.get("contract_version", 1),
+        }
+
+    def record_contract_check(self, table: DeltaTable, result: dict) -> None:
+        registry = self._load_registry()
+        current = registry.get(table.id, {})
+        if "contract_mode" not in current:
+            current.update(self._default_contract(table))
+        current["contract_last_check_status"] = result.get("status", "pass")
+        current["contract_last_check_summary"] = result.get("summary", "Schema contract check completed.")
+        current["contract_last_check_issues"] = list(result.get("issues") or [])
+        current["contract_last_check_at"] = datetime.now(timezone.utc).isoformat()
+        registry[table.id] = current
+        self._save_registry(registry)
