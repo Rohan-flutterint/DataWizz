@@ -76,6 +76,14 @@ class CatalogLineageService:
         )
 
         upstream = self._resolve_upstream(db, table, related_pipelines, notebook_artifacts)
+        lineage_counts = {
+            "semantic_datasets": len(semantic_datasets),
+            "charts": len(charts),
+            "dashboards": len(dashboard_map),
+            "report_schedules": len(report_schedules),
+            "related_pipelines": len(related_pipelines),
+            "notebook_artifacts": len(notebook_artifacts),
+        }
 
         return {
             "table_id": table.id,
@@ -136,14 +144,17 @@ class CatalogLineageService:
                 }
                 for schedule in report_schedules
             ],
-            "counts": {
-                "semantic_datasets": len(semantic_datasets),
-                "charts": len(charts),
-                "dashboards": len(dashboard_map),
-                "report_schedules": len(report_schedules),
-                "related_pipelines": len(related_pipelines),
-                "notebook_artifacts": len(notebook_artifacts),
-            },
+            "counts": lineage_counts,
+            "impact_analysis": self._build_impact_analysis(
+                table=table,
+                counts=lineage_counts,
+                related_pipelines=related_pipelines,
+                notebook_artifacts=notebook_artifacts,
+                semantic_datasets=semantic_datasets,
+                charts=charts,
+                dashboards=list(dashboard_map.values()),
+                report_schedules=report_schedules,
+            ),
         }
 
     def _resolve_upstream(
@@ -222,6 +233,174 @@ class CatalogLineageService:
             "kind": "unknown",
             "label": "Unknown origin",
             "source_query": source_query or None,
+        }
+
+    def _build_impact_analysis(
+        self,
+        *,
+        table: DeltaTable,
+        counts: dict,
+        related_pipelines: list[dict],
+        notebook_artifacts: list[NotebookArtifact],
+        semantic_datasets: list[SemanticDataset],
+        charts: list[Chart],
+        dashboards: list[Dashboard],
+        report_schedules: list[ReportSchedule],
+    ) -> dict:
+        total_downstream_assets = (
+            counts["semantic_datasets"]
+            + counts["charts"]
+            + counts["dashboards"]
+            + counts["report_schedules"]
+        )
+        score = min(
+            100,
+            counts["semantic_datasets"] * 8
+            + counts["charts"] * 12
+            + counts["dashboards"] * 18
+            + counts["report_schedules"] * 22
+            + counts["related_pipelines"] * 10
+            + counts["notebook_artifacts"] * 6,
+        )
+        if counts["report_schedules"] >= 2 or counts["dashboards"] >= 3 or score >= 85:
+            severity = "critical"
+        elif counts["report_schedules"] >= 1 or counts["dashboards"] >= 1 or score >= 45:
+            severity = "high"
+        elif total_downstream_assets > 0 or counts["related_pipelines"] > 0 or counts["notebook_artifacts"] > 0:
+            severity = "medium"
+        else:
+            severity = "low"
+
+        if counts["report_schedules"] > 0 or counts["dashboards"] > 0:
+            business_exposure = "Executive-facing BI dependencies exist. Treat schema or semantic changes as stakeholder-visible."
+        elif counts["charts"] > 0 or counts["semantic_datasets"] > 0:
+            business_exposure = "Analyst-facing BI dependencies exist. Validate semantic contracts before changing the table."
+        else:
+            business_exposure = "Low BI exposure right now. This table is not widely consumed by dashboards or scheduled reports."
+
+        if counts["related_pipelines"] > 1:
+            orchestration_exposure = "Multiple pipelines reference this table. Coordinate changes with orchestration owners."
+        elif counts["related_pipelines"] == 1:
+            orchestration_exposure = "One pipeline references this table. Check node configuration and downstream contracts."
+        else:
+            orchestration_exposure = "No pipeline definitions currently target this table."
+
+        if counts["notebook_artifacts"] > 1:
+            notebook_exposure = "Multiple notebook publishes are tied to this asset. Engine Lab users may need to rerun saved results."
+        elif counts["notebook_artifacts"] == 1:
+            notebook_exposure = "One notebook publish is recorded for this asset."
+        else:
+            notebook_exposure = "No retained notebook publishes are linked to this table."
+
+        recommended_checks: list[str] = []
+        if counts["semantic_datasets"] > 0:
+            recommended_checks.append("Validate semantic dataset dimensions and metrics against the changed schema.")
+        if counts["charts"] > 0:
+            recommended_checks.append("Re-run saved chart previews that depend on this table to confirm grouping and measure logic still holds.")
+        if counts["dashboards"] > 0:
+            recommended_checks.append("Review dashboard widgets for blank states, filter regressions, and metric drift after the change.")
+        if counts["report_schedules"] > 0:
+            recommended_checks.append("Execute at least one linked report schedule before shipping the change to verify exported artifacts still render.")
+        if counts["related_pipelines"] > 0:
+            recommended_checks.append("Check pipeline write/read contracts, especially writeDelta node targets and scheduled runs.")
+        if counts["notebook_artifacts"] > 0:
+            recommended_checks.append("Ask notebook owners to rerun published cells so saved notebook outputs stay aligned with the table.")
+        if not recommended_checks:
+            recommended_checks.append("This table has limited retained lineage. A localized schema or logic change is likely low-risk.")
+
+        highest_risk_assets: list[dict] = []
+        for schedule in report_schedules[:3]:
+            highest_risk_assets.append(
+                {
+                    "kind": "report_schedule",
+                    "asset_id": schedule.id,
+                    "label": schedule.name,
+                    "secondary_label": f"{schedule.frequency} · {schedule.destination}",
+                    "reason": "Scheduled exports may fail or deliver stale business-facing artifacts after this change.",
+                    "severity": "critical",
+                    "route_ref": f"/bi/reports?scheduleId={schedule.id}" + (f"&dashboardId={schedule.dashboard_id}" if schedule.dashboard_id else ""),
+                }
+            )
+        for dashboard in dashboards[:3]:
+            highest_risk_assets.append(
+                {
+                    "kind": "dashboard",
+                    "asset_id": dashboard.id,
+                    "label": dashboard.name,
+                    "secondary_label": dashboard.description,
+                    "reason": "Dashboard widgets can regress immediately if schema, semantics, or row-level expectations change.",
+                    "severity": "high" if severity != "low" else "medium",
+                    "route_ref": f"/bi/dashboards?dashboardId={dashboard.id}",
+                }
+            )
+        for chart in charts[:3]:
+            highest_risk_assets.append(
+                {
+                    "kind": "chart",
+                    "asset_id": chart.id,
+                    "label": chart.name,
+                    "secondary_label": chart.chart_type,
+                    "reason": "Saved charts should be re-previewed to validate dimensions, measures, and filters.",
+                    "severity": "high" if counts["charts"] > 2 else "medium",
+                    "route_ref": f"/bi/charts?chartId={chart.id}",
+                }
+            )
+        for pipeline in related_pipelines[:2]:
+            highest_risk_assets.append(
+                {
+                    "kind": "pipeline",
+                    "asset_id": pipeline["pipeline_id"],
+                    "label": pipeline["pipeline_name"],
+                    "secondary_label": pipeline.get("node_id"),
+                    "reason": "Pipeline orchestration depends on this table contract and should be revalidated before rollout.",
+                    "severity": "medium",
+                    "route_ref": f"/pipelines?pipelineId={pipeline['pipeline_id']}",
+                }
+            )
+        for artifact in notebook_artifacts[:2]:
+            highest_risk_assets.append(
+                {
+                    "kind": "notebook",
+                    "asset_id": artifact.notebook_id,
+                    "label": artifact.display_name,
+                    "secondary_label": artifact.cell_title or artifact.cell_id,
+                    "reason": "Notebook-published outputs may need to be rerun to stay consistent with the curated table.",
+                    "severity": "medium",
+                    "route_ref": f"/engines?notebookId={artifact.notebook_id}",
+                }
+            )
+        for dataset in semantic_datasets[:2]:
+            highest_risk_assets.append(
+                {
+                    "kind": "semantic_dataset",
+                    "asset_id": dataset.id,
+                    "label": dataset.name,
+                    "secondary_label": f"{len(dataset.metrics_json or [])} metrics · {len(dataset.dimensions_json or [])} dimensions",
+                    "reason": "Semantic definitions can drift if source columns or business logic change.",
+                    "severity": "medium",
+                    "route_ref": f"/bi/datasets?datasetId={dataset.id}",
+                }
+            )
+
+        if severity == "critical":
+            safe_change_summary = f"{table.schema_name}.{table.name} has broad downstream exposure. Treat changes as coordinated releases with BI and orchestration validation."
+        elif severity == "high":
+            safe_change_summary = f"{table.schema_name}.{table.name} is actively consumed. Make changes behind a validation pass across dependent assets."
+        elif severity == "medium":
+            safe_change_summary = f"{table.schema_name}.{table.name} has some retained dependents. Verify linked assets before publishing structural or logic changes."
+        else:
+            safe_change_summary = f"{table.schema_name}.{table.name} currently has a small retained blast radius and appears safe for isolated evolution."
+
+        return {
+            "severity": severity,
+            "score": score,
+            "total_downstream_assets": total_downstream_assets,
+            "business_exposure": business_exposure,
+            "orchestration_exposure": orchestration_exposure,
+            "notebook_exposure": notebook_exposure,
+            "safe_change_summary": safe_change_summary,
+            "recommended_checks": recommended_checks,
+            "highest_risk_assets": highest_risk_assets[:6],
         }
 
 

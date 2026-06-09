@@ -46,6 +46,17 @@ function lineageFocusTone(theme: 'light' | 'dark', active: boolean) {
     : 'border-slate-200 bg-slate-50 text-slate-500'
 }
 
+function impactSeverityTone(severity?: string) {
+  if (severity === 'critical') return 'bg-rose-50 text-rose-700'
+  if (severity === 'high') return 'bg-amber-50 text-amber-700'
+  if (severity === 'medium') return 'bg-cyan-50 text-lagoon'
+  return 'bg-emerald-50 text-emerald-700'
+}
+
+function impactSeverityLabel(severity?: string) {
+  return severity ? severity.replace(/_/g, ' ') : 'low'
+}
+
 export function CatalogPage() {
   const { hasAnyRole } = useAuth()
   const canEdit = hasAnyRole('admin', 'analyst')
@@ -177,6 +188,10 @@ export function CatalogPage() {
   const openDataset = (datasetId: string) => navigate(`/bi/datasets?datasetId=${encodeURIComponent(datasetId)}`)
   const openChart = (chartId: string) => navigate(`/bi/charts?chartId=${encodeURIComponent(chartId)}`)
   const openDashboard = (dashboardId: string) => navigate(`/bi/dashboards?dashboardId=${encodeURIComponent(dashboardId)}`)
+  const openRouteRef = (routeRef?: string | null) => {
+    if (!routeRef) return
+    navigate(routeRef)
+  }
   const openReports = (dashboardId?: string | null, scheduleId?: string | null) => {
     const params = new URLSearchParams()
     if (dashboardId) params.set('dashboardId', dashboardId)
@@ -509,6 +524,106 @@ export function CatalogPage() {
                     </div>
                   </div>
                 </Panel>
+
+                {selectedLineage ? (
+                  <Panel className="space-y-5">
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Impact Analysis</p>
+                        <h3 className="mt-2 font-display text-2xl text-ink">Blast Radius and Change Safety</h3>
+                        <p className="mt-3 max-w-3xl text-sm leading-6 text-slate/70">
+                          {selectedLineage.impact_analysis.safe_change_summary}
+                        </p>
+                      </div>
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${impactSeverityTone(selectedLineage.impact_analysis.severity)}`}>
+                        {impactSeverityLabel(selectedLineage.impact_analysis.severity)} impact
+                      </span>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <div className={cn('rounded-2xl p-4', theme === 'dark' ? 'bg-white/[0.03]' : 'bg-slate-50')}>
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Impact Score</p>
+                        <p className="mt-2 font-display text-2xl text-ink">{selectedLineage.impact_analysis.score}/100</p>
+                        <p className="mt-2 text-sm text-slate/70">Weighted from BI, orchestration, and notebook dependencies.</p>
+                      </div>
+                      <div className={cn('rounded-2xl p-4', theme === 'dark' ? 'bg-white/[0.03]' : 'bg-slate-50')}>
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Downstream Assets</p>
+                        <p className="mt-2 font-display text-2xl text-ink">{selectedLineage.impact_analysis.total_downstream_assets}</p>
+                        <p className="mt-2 text-sm text-slate/70">Datasets, charts, dashboards, and scheduled reports directly linked to this table.</p>
+                      </div>
+                      <div className={cn('rounded-2xl p-4', theme === 'dark' ? 'bg-white/[0.03]' : 'bg-slate-50')}>
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Business Exposure</p>
+                        <p className="mt-2 text-sm leading-6 text-ink">{selectedLineage.impact_analysis.business_exposure}</p>
+                      </div>
+                      <div className={cn('rounded-2xl p-4', theme === 'dark' ? 'bg-white/[0.03]' : 'bg-slate-50')}>
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Operational Exposure</p>
+                        <p className="mt-2 text-sm leading-6 text-ink">{selectedLineage.impact_analysis.orchestration_exposure}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+                      <div className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-white/[0.03]' : 'border-slate-100 bg-slate-50')}>
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Highest-Risk Assets</p>
+                            <p className="mt-2 text-sm text-slate/70">These are the first places to inspect before shipping a table change.</p>
+                          </div>
+                          <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-lagoon">
+                            {selectedLineage.impact_analysis.highest_risk_assets.length} linked
+                          </span>
+                        </div>
+
+                        <div className="mt-4 space-y-3">
+                          {selectedLineage.impact_analysis.highest_risk_assets.length ? (
+                            selectedLineage.impact_analysis.highest_risk_assets.map((asset) => (
+                              <div key={`${asset.kind}-${asset.asset_id ?? asset.label}`} className={cn('rounded-2xl p-4', theme === 'dark' ? 'bg-black/20' : 'bg-white')}>
+                                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <p className="break-words font-semibold text-ink">{asset.label}</p>
+                                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${impactSeverityTone(asset.severity)}`}>
+                                        {impactSeverityLabel(asset.severity)}
+                                      </span>
+                                    </div>
+                                    {asset.secondary_label ? (
+                                      <p className="mt-1 text-sm text-slate/70">{asset.secondary_label}</p>
+                                    ) : null}
+                                    <p className="mt-3 text-sm leading-6 text-slate/70">{asset.reason}</p>
+                                  </div>
+                                  {asset.route_ref ? (
+                                    <Button tone="ghost" onClick={() => openRouteRef(asset.route_ref)}>
+                                      Open Asset
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-sm text-slate/70">No high-risk downstream assets are currently retained for this table.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-white/[0.03]' : 'border-slate-100 bg-slate-50')}>
+                          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Notebook Exposure</p>
+                          <p className="mt-2 text-sm leading-6 text-ink">{selectedLineage.impact_analysis.notebook_exposure}</p>
+                        </div>
+                        <div className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-white/[0.03]' : 'border-slate-100 bg-slate-50')}>
+                          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Recommended Validation Checklist</p>
+                          <div className="mt-4 space-y-3">
+                            {selectedLineage.impact_analysis.recommended_checks.map((item) => (
+                              <div key={item} className={cn('flex items-start gap-3 rounded-2xl p-3', theme === 'dark' ? 'bg-black/20' : 'bg-white')}>
+                                <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#0b7285]" />
+                                <p className="text-sm leading-6 text-ink">{item}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </Panel>
+                ) : null}
 
                 <div className="grid gap-5 xl:grid-cols-[0.85fr_minmax(0,1.15fr)]">
                   <Panel>

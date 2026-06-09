@@ -181,6 +181,25 @@ export type TableLineage = {
     related_pipelines: number
     notebook_artifacts: number
   }
+  impact_analysis: {
+    severity: string
+    score: number
+    total_downstream_assets: number
+    business_exposure: string
+    orchestration_exposure: string
+    notebook_exposure: string
+    safe_change_summary: string
+    recommended_checks: string[]
+    highest_risk_assets: {
+      kind: string
+      asset_id?: string | null
+      label: string
+      secondary_label?: string | null
+      reason: string
+      severity: string
+      route_ref?: string | null
+    }[]
+  }
 }
 
 export type QueryHistory = {
