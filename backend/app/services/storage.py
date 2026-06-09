@@ -12,11 +12,13 @@ class StorageService:
         self.settings = get_settings()
         self.raw_dir = Path(self.settings.raw_storage_path)
         self.curated_dir = Path(self.settings.curated_storage_path)
+        self.serving_dir = Path(self.settings.serving_storage_path)
         self.temp_dir = Path(self.settings.temp_storage_path)
 
     def ensure_directories(self) -> None:
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.curated_dir.mkdir(parents=True, exist_ok=True)
+        self.serving_dir.mkdir(parents=True, exist_ok=True)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
     def save_upload(self, upload: UploadFile) -> tuple[Path, int]:
@@ -40,7 +42,7 @@ class StorageService:
 
     def get_storage_usage_bytes(self) -> int:
         total = 0
-        for base_dir in [self.raw_dir, self.curated_dir, self.temp_dir]:
+        for base_dir in [self.raw_dir, self.curated_dir, self.serving_dir, self.temp_dir]:
             for path in base_dir.rglob("*"):
                 if path.is_file():
                     total += path.stat().st_size

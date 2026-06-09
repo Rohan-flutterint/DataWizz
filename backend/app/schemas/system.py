@@ -30,6 +30,8 @@ class SupersetHealthResponse(BaseModel):
     http_status: int | None = None
     detail: str | None = None
     login: dict
+    serving_catalog: dict
+    auto_connection: dict
     sample_connections: list[dict]
     sample_datasets: list[dict]
     setup: dict

@@ -17,6 +17,7 @@ from app.services.catalog_lineage_service import catalog_lineage_service
 from app.services.catalog_metadata_service import CatalogMetadataService
 from app.services.delta_service import DeltaService
 from app.services.duckdb_service import DuckDBService
+from app.services.superset_catalog_service import superset_catalog_service
 
 
 router = APIRouter(prefix="/tables", tags=["tables"])
@@ -76,6 +77,7 @@ def update_table_metadata(table_id: str, payload: DeltaTableMetadataUpdateReques
         enriched,
         catalog_governance_service.build_score(table, enriched, lineage),
     )
+    superset_catalog_service.safe_sync(db, reason=f"table_metadata:{table.name}")
     return DeltaTableRead.model_validate(governed)
 
 

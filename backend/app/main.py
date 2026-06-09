@@ -10,6 +10,7 @@ from app.db.session import Base, SessionLocal, engine
 from app.services.auth_service import auth_service
 from app.services.pipeline_scheduler_service import pipeline_scheduler_service
 from app.services.storage import StorageService
+from app.services.superset_catalog_service import superset_catalog_service
 
 
 settings = get_settings()
@@ -39,6 +40,7 @@ async def on_startup() -> None:
     db = SessionLocal()
     try:
         auth_service.ensure_seed_users(db)
+        superset_catalog_service.safe_sync(db, reason="startup")
     finally:
         db.close()
     await pipeline_scheduler_service.start()

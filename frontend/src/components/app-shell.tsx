@@ -33,7 +33,7 @@ const navGroups = [
       { label: 'Dashboard Builder', to: '/bi/dashboards/new', icon: LayoutDashboard, end: true, roles: ['admin', 'analyst'] },
       { label: 'Dashboard Viewer', to: '/bi/dashboards', icon: TableProperties, end: true },
       { label: 'Report Scheduler', to: '/bi/reports', icon: PlaySquare, end: true, roles: ['admin', 'analyst'] },
-      { label: 'Superset Setup', to: '/bi/superset', icon: Sparkles, end: true },
+      { label: 'Superset', to: '/bi/superset', icon: Sparkles, end: true },
     ],
   },
 ]

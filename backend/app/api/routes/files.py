@@ -8,6 +8,7 @@ from app.models.catalog import UploadedFile
 from app.schemas.files import FileDeleteResponse, FileListResponse, FilePreviewResponse, FileUploadResponse, UploadedFileRead
 from app.services.duckdb_service import DuckDBService
 from app.services.storage import StorageService
+from app.services.superset_catalog_service import superset_catalog_service
 from app.utils.tabular import detect_file_type
 
 
@@ -45,6 +46,7 @@ def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db)) -> 
     record.row_count = preview["row_count"]
     db.commit()
     db.refresh(record)
+    superset_catalog_service.safe_sync(db, reason=f"file_upload:{record.name}")
 
     return FileUploadResponse(file=record)
 
@@ -77,4 +79,5 @@ def delete_file(file_id: str, db: Session = Depends(get_db)) -> FileDeleteRespon
     storage_service.delete_path(record.storage_path)
     db.delete(record)
     db.commit()
+    superset_catalog_service.safe_sync(db, reason=f"file_delete:{record.name}")
     return FileDeleteResponse(message="File deleted successfully")

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/lakehouse"
     raw_storage_path: str = str(ROOT_DIR / "storage" / "raw")
     curated_storage_path: str = str(ROOT_DIR / "storage" / "curated")
+    serving_storage_path: str = str(ROOT_DIR / "storage" / "serving")
     temp_storage_path: str = str(ROOT_DIR / "storage" / "temp")
 
     minio_endpoint: str = "http://localhost:9000"

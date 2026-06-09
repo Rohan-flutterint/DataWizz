@@ -78,6 +78,9 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+# macOS
+.DS_Store
+
 # IPython
 profile_default/
 ipython_config.py
@@ -146,6 +149,9 @@ venv.bak/
 # mkdocs documentation
 /site
 
+# Frontend build output
+frontend/dist/
+
 # mypy
 .mypy_cache/
 .dmypy.json
@@ -182,3 +188,10 @@ cython_debug/
 
 # Local runtime artifacts
 .runtime/
+.superset-venv/
+
+# Local generated databases
+backend/*.db
+storage/temp/
+storage/serving/*.duckdb
+storage/serving/*.json

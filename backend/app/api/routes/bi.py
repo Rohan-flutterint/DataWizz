@@ -38,6 +38,7 @@ from app.schemas.bi import (
     SemanticDatasetUpdateRequest,
 )
 from app.services.bi_service import BiService
+from app.services.superset_catalog_service import superset_catalog_service
 
 
 router = APIRouter(prefix="/bi", tags=["bi"])
@@ -63,6 +64,7 @@ def create_dataset(payload: SemanticDatasetCreateRequest, db: Session = Depends(
         db.rollback()
         raise HTTPException(status_code=409, detail="A dataset with this name already exists. Please try again.") from exc
     db.refresh(record)
+    superset_catalog_service.safe_sync(db, reason=f"dataset_create:{record.name}")
     return record
 
 
@@ -81,6 +83,7 @@ def update_dataset(dataset_id: str, payload: SemanticDatasetUpdateRequest, db: S
         db.rollback()
         raise HTTPException(status_code=409, detail="A dataset with this name already exists. Please try again.") from exc
     db.refresh(record)
+    superset_catalog_service.safe_sync(db, reason=f"dataset_update:{record.name}")
     return record
 
 
