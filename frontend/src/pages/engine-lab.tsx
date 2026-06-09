@@ -10,7 +10,7 @@ import { saveNotebookDatasetHandoff } from '../lib/dataset-handoff'
 import { api } from '../lib/api'
 import { cn, formatDate } from '../lib/utils'
 import { useTheme } from '../theme/theme-context'
-import type { DeltaTable, ExecutionEngine, NotebookArtifact, NotebookCell, NotebookCellRunResult, NotebookDocument, NotebookSnippet, UploadedFile } from '../types'
+import type { DeltaTable, ExecutionEngine, NotebookArtifact, NotebookCell, NotebookCellRunResult, NotebookDocument, NotebookEvent, NotebookSnippet, UploadedFile } from '../types'
 import { useNavigate } from 'react-router-dom'
 
 function capabilityPill(enabled: boolean, label: string, theme: 'light' | 'dark') {
@@ -146,6 +146,36 @@ function renderMarkdownBlocks(markdown: string) {
       </p>
     )
   })
+}
+
+function formatNotebookEventAction(action: string) {
+  const labels: Record<string, string> = {
+    create: 'Created notebook',
+    save: 'Saved notebook',
+    duplicate: 'Duplicated notebook',
+    restore: 'Restored revision',
+    run_all: 'Ran all cells',
+    run_cell: 'Ran one cell',
+    run_from_here: 'Reran from cell',
+    export_csv: 'Exported CSV',
+    export_parquet: 'Exported Parquet',
+    publish_delta: 'Published to Delta',
+    download_artifact: 'Downloaded artifact',
+  }
+  return labels[action] ?? action.replace(/_/g, ' ')
+}
+
+function summarizeNotebookEvent(event: NotebookEvent) {
+  const metadata = event.metadata_json ?? {}
+  const badges: string[] = []
+  if (typeof metadata.version_number === 'number') badges.push(`v${metadata.version_number}`)
+  if (typeof metadata.restored_from_version === 'number') badges.push(`from v${metadata.restored_from_version}`)
+  if (typeof metadata.row_count === 'number') badges.push(`${metadata.row_count} rows`)
+  if (typeof metadata.cell_results === 'number') badges.push(`${metadata.cell_results} results`)
+  if (typeof metadata.duration_ms === 'number') badges.push(`${metadata.duration_ms} ms`)
+  if (typeof metadata.delta_table_name === 'string') badges.push(`Delta ${metadata.delta_table_name}`)
+  if (typeof metadata.engine_id === 'string') badges.push(metadata.engine_id.toUpperCase())
+  return badges.slice(0, 4)
 }
 
 function buildDefaultNotebook(engine: ExecutionEngine | null): NotebookDocument | null {
@@ -600,6 +630,7 @@ export function EngineLabPage() {
   }
 
   const activeNotebookRuns = notebookDetailQuery.data?.recent_runs ?? []
+  const activeNotebookEvents = notebookDetailQuery.data?.recent_events ?? []
   const activeNotebookRevisions = notebookDetailQuery.data?.recent_revisions ?? []
   const activeNotebookArtifacts = notebookDetailQuery.data?.recent_artifacts ?? []
   const filteredSnippetLibrary = snippetLibrary.filter((entry) => entry.engine_scope === 'all' || entry.engine_scope === activeEngineId)
@@ -1012,6 +1043,53 @@ export function EngineLabPage() {
                 ))
               ) : (
                 <p className="text-sm text-slate/75">No notebooks saved yet. Start with a new notebook and save it to keep it in the library.</p>
+              )}
+            </div>
+          </Panel>
+
+          <Panel>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Activity Timeline</p>
+            <div className="mt-4 space-y-3">
+              {activeNotebookEvents.length ? (
+                activeNotebookEvents.map((event) => {
+                  const summaryBadges = summarizeNotebookEvent(event)
+                  return (
+                    <div key={event.id} className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-white/[0.03]' : 'border-slate-200 bg-slate-50')}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-ink">{formatNotebookEventAction(event.action)}</p>
+                          <p className="mt-1 text-sm text-slate/75">{event.actor_name} · {event.actor_role}</p>
+                        </div>
+                        <span className={cn('shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em]', theme === 'dark' ? 'bg-white/5 text-white/60' : 'bg-white text-slate-500')}>
+                          {event.action.replace(/_/g, ' ')}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex items-center gap-2 text-xs text-slate/60">
+                        <Clock3 className="h-3.5 w-3.5" />
+                        {formatDate(event.created_at)}
+                      </div>
+                      <p className="mt-3 text-sm text-slate/70">{event.message}</p>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]', theme === 'dark' ? 'bg-cyan-500/10 text-cyan-200' : 'bg-cyan-100 text-lagoon')}>
+                          {event.actor_email}
+                        </span>
+                        {summaryBadges.map((badge) => (
+                          <span
+                            key={`${event.id}-${badge}`}
+                            className={cn(
+                              'rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]',
+                              theme === 'dark' ? 'bg-emerald-500/10 text-emerald-200' : 'bg-emerald-100 text-emerald-700',
+                            )}
+                          >
+                            {badge}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })
+              ) : (
+                <p className="text-sm text-slate/75">Notebook activity will appear here after teammates save, run, export, restore, or publish results.</p>
               )}
             </div>
           </Panel>

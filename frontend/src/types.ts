@@ -601,6 +601,21 @@ export type NotebookArtifact = {
   updated_at: string
 }
 
+export type NotebookEvent = {
+  id: string
+  notebook_id: string
+  notebook_run_id?: string | null
+  artifact_id?: string | null
+  action: string
+  actor_name: string
+  actor_email: string
+  actor_role: string
+  message: string
+  metadata_json?: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+}
+
 export type NotebookCellRunResult = {
   cell_id: string
   title?: string | null
@@ -616,6 +631,7 @@ export type NotebookCellRunResult = {
 
 export type NotebookDetail = {
   notebook: NotebookDocument
+  recent_events: NotebookEvent[]
   recent_revisions: NotebookRevision[]
   recent_runs: NotebookRun[]
   recent_artifacts: NotebookArtifact[]

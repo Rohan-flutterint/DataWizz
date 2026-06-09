@@ -68,6 +68,18 @@ class NotebookRevisionRead(TimestampedModel):
     summary_json: dict | None = None
 
 
+class NotebookEventRead(TimestampedModel):
+    notebook_id: str
+    notebook_run_id: str | None = None
+    artifact_id: str | None = None
+    action: str
+    actor_name: str
+    actor_email: str
+    actor_role: str
+    message: str
+    metadata_json: dict | None = None
+
+
 class NotebookArtifactRead(TimestampedModel):
     notebook_id: str
     notebook_run_id: str | None = None
@@ -108,6 +120,7 @@ class NotebookListResponse(BaseModel):
 
 class NotebookDetailResponse(BaseModel):
     notebook: NotebookDocumentRead
+    recent_events: list[NotebookEventRead]
     recent_revisions: list[NotebookRevisionRead]
     recent_runs: list[NotebookRunRead]
     recent_artifacts: list[NotebookArtifactRead]

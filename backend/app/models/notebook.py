@@ -28,6 +28,20 @@ class NotebookRevision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
+class NotebookEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "notebook_events"
+
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    notebook_run_id: Mapped[str | None] = mapped_column(ForeignKey("notebook_runs.id", ondelete="SET NULL"), nullable=True)
+    artifact_id: Mapped[str | None] = mapped_column(ForeignKey("notebook_artifacts.id", ondelete="SET NULL"), nullable=True)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    actor_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
 class NotebookRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "notebook_runs"
 

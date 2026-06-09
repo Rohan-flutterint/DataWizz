@@ -10,10 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 
-from app.api.dependencies import require_roles
+from app.api.dependencies import get_current_user, require_roles
 from app.db.session import get_db
+from app.models.auth import User
 from app.models.catalog import DeltaTable, UploadedFile
-from app.models.notebook import NotebookArtifact, NotebookDocument, NotebookRevision, NotebookRun, NotebookSnippet
+from app.models.notebook import NotebookArtifact, NotebookDocument, NotebookEvent, NotebookRevision, NotebookRun, NotebookSnippet
 from app.schemas.common import ApiMessage
 from app.schemas.engines import EngineCatalogResponse, NotebookExecutionRequest, NotebookExecutionResponse
 from app.schemas.notebooks import (
@@ -119,6 +120,34 @@ def _create_notebook_revision(db: Session, notebook: NotebookDocument, action: s
     return revision
 
 
+def _create_notebook_event(
+    db: Session,
+    *,
+    notebook: NotebookDocument,
+    actor: User,
+    action: str,
+    message: str,
+    notebook_run_id: str | None = None,
+    artifact_id: str | None = None,
+    metadata_json: dict | None = None,
+) -> NotebookEvent:
+    event = NotebookEvent(
+        notebook_id=notebook.id,
+        notebook_run_id=notebook_run_id,
+        artifact_id=artifact_id,
+        action=action,
+        actor_name=actor.name,
+        actor_email=actor.email,
+        actor_role=actor.role,
+        message=message,
+        metadata_json=metadata_json,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
 @router.get("/notebooks", response_model=NotebookListResponse)
 def list_notebooks(db: Session = Depends(get_db)) -> NotebookListResponse:
     items = db.query(NotebookDocument).order_by(desc(NotebookDocument.updated_at)).all()
@@ -178,7 +207,11 @@ def delete_notebook_snippet(snippet_id: str, db: Session = Depends(get_db)) -> A
 
 
 @router.post("/notebooks", response_model=NotebookDocumentRead, dependencies=[Depends(require_roles("admin", "analyst"))])
-def create_notebook(payload: NotebookDocumentCreateRequest, db: Session = Depends(get_db)) -> NotebookDocumentRead:
+def create_notebook(
+    payload: NotebookDocumentCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> NotebookDocumentRead:
     record = NotebookDocument(
         name=_resolve_notebook_name(db, payload.name),
         engine_id=payload.engine_id,
@@ -193,7 +226,15 @@ def create_notebook(payload: NotebookDocumentCreateRequest, db: Session = Depend
         db.rollback()
         raise HTTPException(status_code=409, detail="A notebook with this name already exists. Please try again.") from exc
     db.refresh(record)
-    _create_notebook_revision(db, record, "create")
+    revision = _create_notebook_revision(db, record, "create")
+    _create_notebook_event(
+        db,
+        notebook=record,
+        actor=current_user,
+        action="create",
+        message=f"Created notebook {record.name}.",
+        metadata_json={"revision_id": revision.id, "version_number": revision.version_number},
+    )
     return record
 
 
@@ -202,6 +243,13 @@ def get_notebook(notebook_id: str, db: Session = Depends(get_db)) -> NotebookDet
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
         raise HTTPException(status_code=404, detail="Notebook not found")
+    recent_events = (
+        db.query(NotebookEvent)
+        .filter(NotebookEvent.notebook_id == notebook_id)
+        .order_by(desc(NotebookEvent.created_at))
+        .limit(20)
+        .all()
+    )
     recent_revisions = (
         db.query(NotebookRevision)
         .filter(NotebookRevision.notebook_id == notebook_id)
@@ -225,6 +273,7 @@ def get_notebook(notebook_id: str, db: Session = Depends(get_db)) -> NotebookDet
     )
     return NotebookDetailResponse(
         notebook=notebook,
+        recent_events=recent_events,
         recent_revisions=recent_revisions,
         recent_runs=recent_runs,
         recent_artifacts=recent_artifacts,
@@ -236,6 +285,7 @@ def update_notebook(
     notebook_id: str,
     payload: NotebookDocumentUpdateRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> NotebookDocumentRead:
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
@@ -252,12 +302,24 @@ def update_notebook(
         db.rollback()
         raise HTTPException(status_code=409, detail="A notebook with this name already exists. Please try again.") from exc
     db.refresh(notebook)
-    _create_notebook_revision(db, notebook, "save")
+    revision = _create_notebook_revision(db, notebook, "save")
+    _create_notebook_event(
+        db,
+        notebook=notebook,
+        actor=current_user,
+        action="save",
+        message=f"Saved notebook {notebook.name}.",
+        metadata_json={"revision_id": revision.id, "version_number": revision.version_number},
+    )
     return notebook
 
 
 @router.post("/notebooks/{notebook_id}/duplicate", response_model=NotebookDocumentRead, dependencies=[Depends(require_roles("admin", "analyst"))])
-def duplicate_notebook(notebook_id: str, db: Session = Depends(get_db)) -> NotebookDocumentRead:
+def duplicate_notebook(
+    notebook_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> NotebookDocumentRead:
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
         raise HTTPException(status_code=404, detail="Notebook not found")
@@ -275,7 +337,15 @@ def duplicate_notebook(notebook_id: str, db: Session = Depends(get_db)) -> Noteb
         db.rollback()
         raise HTTPException(status_code=409, detail="This notebook could not be duplicated right now. Please try again.") from exc
     db.refresh(duplicate)
-    _create_notebook_revision(db, duplicate, "duplicate")
+    revision = _create_notebook_revision(db, duplicate, "duplicate")
+    _create_notebook_event(
+        db,
+        notebook=duplicate,
+        actor=current_user,
+        action="duplicate",
+        message=f"Duplicated notebook from {notebook.name}.",
+        metadata_json={"revision_id": revision.id, "version_number": revision.version_number, "source_notebook_id": notebook.id},
+    )
     return duplicate
 
 
@@ -284,7 +354,12 @@ def duplicate_notebook(notebook_id: str, db: Session = Depends(get_db)) -> Noteb
     response_model=NotebookRevisionRestoreResponse,
     dependencies=[Depends(require_roles("admin", "analyst"))],
 )
-def restore_notebook_revision(notebook_id: str, revision_id: str, db: Session = Depends(get_db)) -> NotebookRevisionRestoreResponse:
+def restore_notebook_revision(
+    notebook_id: str,
+    revision_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> NotebookRevisionRestoreResponse:
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
         raise HTTPException(status_code=404, detail="Notebook not found")
@@ -312,6 +387,19 @@ def restore_notebook_revision(notebook_id: str, revision_id: str, db: Session = 
         raise HTTPException(status_code=409, detail="This revision could not be restored because the notebook name is already taken.") from exc
     db.refresh(notebook)
     restored_revision = _create_notebook_revision(db, notebook, "restore")
+    _create_notebook_event(
+        db,
+        notebook=notebook,
+        actor=current_user,
+        action="restore",
+        message=f"Restored notebook {notebook.name} to revision v{revision.version_number}.",
+        metadata_json={
+            "restored_from_revision_id": revision.id,
+            "restored_from_version": revision.version_number,
+            "revision_id": restored_revision.id,
+            "version_number": restored_revision.version_number,
+        },
+    )
     db.refresh(notebook)
     return NotebookRevisionRestoreResponse(
         notebook=notebook,
@@ -332,7 +420,11 @@ def delete_notebook(notebook_id: str, db: Session = Depends(get_db)) -> ApiMessa
 
 
 @router.post("/notebooks/{notebook_id}/run", response_model=NotebookRunExecutionResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
-def run_saved_notebook(notebook_id: str, db: Session = Depends(get_db)) -> NotebookRunExecutionResponse:
+def run_saved_notebook(
+    notebook_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> NotebookRunExecutionResponse:
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
         raise HTTPException(status_code=404, detail="Notebook not found")
@@ -349,11 +441,25 @@ def run_saved_notebook(notebook_id: str, db: Session = Depends(get_db)) -> Noteb
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     db.refresh(notebook)
+    _create_notebook_event(
+        db,
+        notebook=notebook,
+        actor=current_user,
+        action="run_all",
+        message=f"Ran all cells in {notebook.name}.",
+        notebook_run_id=run.id,
+        metadata_json={"cell_results": len(cell_results), "duration_ms": run.duration_ms, "engine_id": notebook.engine_id},
+    )
     return NotebookRunExecutionResponse(notebook=notebook, run=run, cell_results=cell_results)
 
 
 @router.post("/notebooks/{notebook_id}/cells/{cell_id}/run", response_model=NotebookCellActionResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
-def run_single_cell(notebook_id: str, cell_id: str, db: Session = Depends(get_db)) -> NotebookCellActionResponse:
+def run_single_cell(
+    notebook_id: str,
+    cell_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> NotebookCellActionResponse:
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
         raise HTTPException(status_code=404, detail="Notebook not found")
@@ -372,6 +478,15 @@ def run_single_cell(notebook_id: str, cell_id: str, db: Session = Depends(get_db
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     db.refresh(notebook)
+    _create_notebook_event(
+        db,
+        notebook=notebook,
+        actor=current_user,
+        action="run_cell",
+        message=f"Ran cell {cell_id} in {notebook.name}.",
+        notebook_run_id=run.id,
+        metadata_json={"cell_id": cell_id, "duration_ms": run.duration_ms, "engine_id": notebook.engine_id},
+    )
     return NotebookCellActionResponse(
         notebook=notebook,
         run=run,
@@ -382,7 +497,12 @@ def run_single_cell(notebook_id: str, cell_id: str, db: Session = Depends(get_db
 
 
 @router.post("/notebooks/{notebook_id}/cells/{cell_id}/run-from-here", response_model=NotebookCellActionResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
-def run_from_cell(notebook_id: str, cell_id: str, db: Session = Depends(get_db)) -> NotebookCellActionResponse:
+def run_from_cell(
+    notebook_id: str,
+    cell_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> NotebookCellActionResponse:
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
         raise HTTPException(status_code=404, detail="Notebook not found")
@@ -400,6 +520,15 @@ def run_from_cell(notebook_id: str, cell_id: str, db: Session = Depends(get_db))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     db.refresh(notebook)
+    _create_notebook_event(
+        db,
+        notebook=notebook,
+        actor=current_user,
+        action="run_from_here",
+        message=f"Reran notebook {notebook.name} from cell {cell_id}.",
+        notebook_run_id=run.id,
+        metadata_json={"cell_id": cell_id, "cell_results": len(cell_results), "duration_ms": run.duration_ms, "engine_id": notebook.engine_id},
+    )
     return NotebookCellActionResponse(
         notebook=notebook,
         run=run,
@@ -415,6 +544,7 @@ def export_notebook_cell(
     cell_id: str,
     payload: NotebookCellExportRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
@@ -451,6 +581,16 @@ def export_notebook_cell(
             )
             db.add(artifact)
             db.commit()
+            db.refresh(artifact)
+            _create_notebook_event(
+                db,
+                notebook=notebook,
+                actor=current_user,
+                action="export_csv",
+                message=f"Exported cell {cell_id} from {notebook.name} as CSV.",
+                artifact_id=artifact.id,
+                metadata_json={"cell_id": cell_id, "row_count": materialized["row_count"], "engine_id": notebook.engine_id},
+            )
             return StreamingResponse(
                 open(file_path, "rb"),
                 media_type="text/csv",
@@ -476,6 +616,16 @@ def export_notebook_cell(
         )
         db.add(artifact)
         db.commit()
+        db.refresh(artifact)
+        _create_notebook_event(
+            db,
+            notebook=notebook,
+            actor=current_user,
+            action="export_parquet",
+            message=f"Exported cell {cell_id} from {notebook.name} as Parquet.",
+            artifact_id=artifact.id,
+            metadata_json={"cell_id": cell_id, "row_count": materialized["row_count"], "engine_id": notebook.engine_id},
+        )
         return StreamingResponse(
             open(file_path, "rb"),
             media_type="application/octet-stream",
@@ -493,6 +643,7 @@ def write_notebook_cell_to_delta(
     cell_id: str,
     payload: NotebookCellWriteDeltaRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> NotebookCellWriteDeltaResponse:
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
@@ -534,6 +685,16 @@ def write_notebook_cell_to_delta(
         )
         db.add(artifact)
         db.commit()
+        db.refresh(artifact)
+        _create_notebook_event(
+            db,
+            notebook=notebook,
+            actor=current_user,
+            action="publish_delta",
+            message=f"Published cell {cell_id} from {notebook.name} to Delta table {table.schema_name}.{table.name}.",
+            artifact_id=artifact.id,
+            metadata_json={"cell_id": cell_id, "delta_table_id": table.id, "delta_table_name": table.name, "mode": payload.mode, "engine_id": notebook.engine_id},
+        )
         return NotebookCellWriteDeltaResponse(message="Notebook result written to Delta successfully", table=table)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -546,7 +707,11 @@ def write_notebook_cell_to_delta(
     response_class=FileResponse,
     dependencies=[Depends(require_roles("admin", "analyst"))],
 )
-def download_notebook_artifact(artifact_id: str, db: Session = Depends(get_db)) -> FileResponse:
+def download_notebook_artifact(
+    artifact_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
     artifact = db.query(NotebookArtifact).filter(NotebookArtifact.id == artifact_id).one_or_none()
     if artifact is None:
         raise HTTPException(status_code=404, detail="Notebook artifact not found")
@@ -555,6 +720,17 @@ def download_notebook_artifact(artifact_id: str, db: Session = Depends(get_db)) 
     file_path = Path(artifact.storage_path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Notebook artifact file is no longer available on disk")
+    notebook = db.query(NotebookDocument).filter(NotebookDocument.id == artifact.notebook_id).one_or_none()
+    if notebook is not None:
+        _create_notebook_event(
+            db,
+            notebook=notebook,
+            actor=current_user,
+            action="download_artifact",
+            message=f"Downloaded artifact {artifact.display_name}.",
+            artifact_id=artifact.id,
+            metadata_json={"artifact_kind": artifact.artifact_kind, "cell_id": artifact.cell_id},
+        )
     media_type = "text/csv" if artifact.artifact_kind == "export_csv" else "application/octet-stream"
     return FileResponse(path=file_path, media_type=media_type, filename=artifact.download_name or file_path.name)
 
