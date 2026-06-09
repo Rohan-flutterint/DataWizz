@@ -563,6 +563,27 @@ export type NotebookRun = {
   updated_at: string
 }
 
+export type NotebookRevision = {
+  id: string
+  notebook_id: string
+  version_number: number
+  action: string
+  snapshot_json: {
+    name?: string
+    engine_id?: string
+    description?: string | null
+    cells_json?: NotebookCell[]
+  }
+  summary_json?: {
+    cell_count?: number
+    code_cells?: number
+    markdown_cells?: number
+    titled_cells?: number
+  } | null
+  created_at: string
+  updated_at: string
+}
+
 export type NotebookArtifact = {
   id: string
   notebook_id: string
@@ -595,6 +616,7 @@ export type NotebookCellRunResult = {
 
 export type NotebookDetail = {
   notebook: NotebookDocument
+  recent_revisions: NotebookRevision[]
   recent_runs: NotebookRun[]
   recent_artifacts: NotebookArtifact[]
 }
@@ -611,6 +633,12 @@ export type NotebookCellActionExecution = {
   cell_results: NotebookCellRunResult[]
   mode: string
   start_cell_id: string
+}
+
+export type NotebookRevisionRestore = {
+  notebook: NotebookDocument
+  revision: NotebookRevision
+  message: string
 }
 
 export type NotebookSnippet = {

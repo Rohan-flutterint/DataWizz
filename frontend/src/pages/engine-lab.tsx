@@ -265,6 +265,10 @@ export function EngineLabPage() {
   const deleteNotebookMutation = useMutation({
     mutationFn: api.deleteNotebook,
   })
+  const restoreNotebookRevisionMutation = useMutation({
+    mutationFn: ({ notebookId, revisionId }: { notebookId: string; revisionId: string }) =>
+      api.restoreNotebookRevision(notebookId, revisionId),
+  })
   const writeNotebookCellDeltaMutation = useMutation({
     mutationFn: ({ notebookId, cellId, payload }: { notebookId: string; cellId: string; payload: { table_name: string; mode: 'overwrite' | 'append'; schema_name: string; description?: string } }) =>
       api.writeNotebookCellDelta(notebookId, cellId, payload),
@@ -596,6 +600,7 @@ export function EngineLabPage() {
   }
 
   const activeNotebookRuns = notebookDetailQuery.data?.recent_runs ?? []
+  const activeNotebookRevisions = notebookDetailQuery.data?.recent_revisions ?? []
   const activeNotebookArtifacts = notebookDetailQuery.data?.recent_artifacts ?? []
   const filteredSnippetLibrary = snippetLibrary.filter((entry) => entry.engine_scope === 'all' || entry.engine_scope === activeEngineId)
   const templateLibrary = filteredSnippetLibrary.filter((entry) => entry.is_template)
@@ -612,6 +617,31 @@ export function EngineLabPage() {
       window.URL.revokeObjectURL(url)
       setRunFeedback(`Downloaded ${artifact.display_name}`)
       setRunError(null)
+    } catch (error) {
+      setRunError((error as Error).message)
+    }
+  }
+
+  const restoreNotebookRevision = async (revisionId: string, versionNumber: number) => {
+    if (!selectedNotebookId) return
+    const confirmed = window.confirm(`Restore notebook to revision v${versionNumber}? Your current draft will be replaced with that saved version.`)
+    if (!confirmed) return
+    setRunError(null)
+    setRunFeedback(null)
+    try {
+      const response = await restoreNotebookRevisionMutation.mutateAsync({ notebookId: selectedNotebookId, revisionId })
+      await queryClient.invalidateQueries({ queryKey: ['notebook-detail', selectedNotebookId] })
+      await queryClient.invalidateQueries({ queryKey: ['notebooks'] })
+      setDraftNotebook(response.notebook)
+      const latestCellResults = response.notebook.latest_cell_results_json ?? []
+      const nextResults: Record<string, NotebookCellRunResult> = {}
+      latestCellResults.forEach((item) => {
+        nextResults[item.cell_id] = item
+      })
+      setCellResults(nextResults)
+      setCollapsedOutputs({})
+      setRenamingCellId(null)
+      setRunFeedback(response.message)
     } catch (error) {
       setRunError((error as Error).message)
     }
@@ -982,6 +1012,48 @@ export function EngineLabPage() {
                 ))
               ) : (
                 <p className="text-sm text-slate/75">No notebooks saved yet. Start with a new notebook and save it to keep it in the library.</p>
+              )}
+            </div>
+          </Panel>
+
+          <Panel>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Revision History</p>
+            <div className="mt-4 space-y-3">
+              {activeNotebookRevisions.length ? (
+                activeNotebookRevisions.map((revision) => (
+                  <div key={revision.id} className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-white/10 bg-white/[0.03]' : 'border-slate-200 bg-slate-50')}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-ink">Version {revision.version_number}</p>
+                        <p className="mt-1 text-sm text-slate/75">
+                          {revision.action} · {revision.summary_json?.cell_count ?? revision.snapshot_json?.cells_json?.length ?? 0} cells
+                          {revision.summary_json?.markdown_cells ? ` · ${revision.summary_json.markdown_cells} markdown` : ''}
+                        </p>
+                      </div>
+                      <span className={cn('rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em]', theme === 'dark' ? 'bg-white/5 text-white/60' : 'bg-white text-slate-500')}>
+                        {revision.snapshot_json?.engine_id || 'notebook'}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex items-center gap-2 text-xs text-slate/60">
+                      <Clock3 className="h-3.5 w-3.5" />
+                      {formatDate(revision.created_at)}
+                    </div>
+                    <p className="mt-3 text-sm text-slate/70">{revision.snapshot_json?.description || 'No revision description captured for this version.'}</p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button
+                        tone="ghost"
+                        disabled={!selectedNotebookId || restoreNotebookRevisionMutation.isPending}
+                        onClick={() => {
+                          void restoreNotebookRevision(revision.id, revision.version_number)
+                        }}
+                      >
+                        {restoreNotebookRevisionMutation.isPending ? 'Restoring...' : 'Restore Revision'}
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-slate/75">Saved notebook versions appear here after you create or save a notebook.</p>
               )}
             </div>
           </Panel>

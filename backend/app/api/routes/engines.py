@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from app.api.dependencies import require_roles
 from app.db.session import get_db
 from app.models.catalog import DeltaTable, UploadedFile
-from app.models.notebook import NotebookArtifact, NotebookDocument, NotebookRun, NotebookSnippet
+from app.models.notebook import NotebookArtifact, NotebookDocument, NotebookRevision, NotebookRun, NotebookSnippet
 from app.schemas.common import ApiMessage
 from app.schemas.engines import EngineCatalogResponse, NotebookExecutionRequest, NotebookExecutionResponse
 from app.schemas.notebooks import (
@@ -26,6 +26,7 @@ from app.schemas.notebooks import (
     NotebookDocumentRead,
     NotebookDocumentUpdateRequest,
     NotebookListResponse,
+    NotebookRevisionRestoreResponse,
     NotebookRunExecutionResponse,
     NotebookSnippetCreateRequest,
     NotebookSnippetListResponse,
@@ -74,6 +75,48 @@ def _resolve_snippet_name(db: Session, proposed_name: str, exclude_id: str | Non
             return candidate
         candidate = f"{base_name} ({suffix})"
         suffix += 1
+
+
+def _build_notebook_snapshot(notebook: NotebookDocument) -> dict:
+    return {
+        "name": notebook.name,
+        "engine_id": notebook.engine_id,
+        "description": notebook.description,
+        "cells_json": list(notebook.cells_json or []),
+    }
+
+
+def _build_notebook_revision_summary(notebook: NotebookDocument) -> dict:
+    cells = list(notebook.cells_json or [])
+    markdown_cells = sum(1 for cell in cells if (cell.get("kind") or "code") == "markdown")
+    code_cells = len(cells) - markdown_cells
+    titled_cells = sum(1 for cell in cells if (cell.get("title") or "").strip())
+    return {
+        "cell_count": len(cells),
+        "code_cells": code_cells,
+        "markdown_cells": markdown_cells,
+        "titled_cells": titled_cells,
+    }
+
+
+def _create_notebook_revision(db: Session, notebook: NotebookDocument, action: str) -> NotebookRevision:
+    latest = (
+        db.query(NotebookRevision)
+        .filter(NotebookRevision.notebook_id == notebook.id)
+        .order_by(NotebookRevision.version_number.desc())
+        .first()
+    )
+    revision = NotebookRevision(
+        notebook_id=notebook.id,
+        version_number=(latest.version_number + 1) if latest else 1,
+        action=action,
+        snapshot_json=_build_notebook_snapshot(notebook),
+        summary_json=_build_notebook_revision_summary(notebook),
+    )
+    db.add(revision)
+    db.commit()
+    db.refresh(revision)
+    return revision
 
 
 @router.get("/notebooks", response_model=NotebookListResponse)
@@ -150,6 +193,7 @@ def create_notebook(payload: NotebookDocumentCreateRequest, db: Session = Depend
         db.rollback()
         raise HTTPException(status_code=409, detail="A notebook with this name already exists. Please try again.") from exc
     db.refresh(record)
+    _create_notebook_revision(db, record, "create")
     return record
 
 
@@ -158,6 +202,13 @@ def get_notebook(notebook_id: str, db: Session = Depends(get_db)) -> NotebookDet
     notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
     if notebook is None:
         raise HTTPException(status_code=404, detail="Notebook not found")
+    recent_revisions = (
+        db.query(NotebookRevision)
+        .filter(NotebookRevision.notebook_id == notebook_id)
+        .order_by(desc(NotebookRevision.version_number))
+        .limit(12)
+        .all()
+    )
     recent_runs = (
         db.query(NotebookRun)
         .filter(NotebookRun.notebook_id == notebook_id)
@@ -172,7 +223,12 @@ def get_notebook(notebook_id: str, db: Session = Depends(get_db)) -> NotebookDet
         .limit(20)
         .all()
     )
-    return NotebookDetailResponse(notebook=notebook, recent_runs=recent_runs, recent_artifacts=recent_artifacts)
+    return NotebookDetailResponse(
+        notebook=notebook,
+        recent_revisions=recent_revisions,
+        recent_runs=recent_runs,
+        recent_artifacts=recent_artifacts,
+    )
 
 
 @router.put("/notebooks/{notebook_id}", response_model=NotebookDocumentRead, dependencies=[Depends(require_roles("admin", "analyst"))])
@@ -196,6 +252,7 @@ def update_notebook(
         db.rollback()
         raise HTTPException(status_code=409, detail="A notebook with this name already exists. Please try again.") from exc
     db.refresh(notebook)
+    _create_notebook_revision(db, notebook, "save")
     return notebook
 
 
@@ -218,7 +275,49 @@ def duplicate_notebook(notebook_id: str, db: Session = Depends(get_db)) -> Noteb
         db.rollback()
         raise HTTPException(status_code=409, detail="This notebook could not be duplicated right now. Please try again.") from exc
     db.refresh(duplicate)
+    _create_notebook_revision(db, duplicate, "duplicate")
     return duplicate
+
+
+@router.post(
+    "/notebooks/{notebook_id}/revisions/{revision_id}/restore",
+    response_model=NotebookRevisionRestoreResponse,
+    dependencies=[Depends(require_roles("admin", "analyst"))],
+)
+def restore_notebook_revision(notebook_id: str, revision_id: str, db: Session = Depends(get_db)) -> NotebookRevisionRestoreResponse:
+    notebook = db.query(NotebookDocument).filter(NotebookDocument.id == notebook_id).one_or_none()
+    if notebook is None:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    revision = (
+        db.query(NotebookRevision)
+        .filter(NotebookRevision.id == revision_id, NotebookRevision.notebook_id == notebook_id)
+        .one_or_none()
+    )
+    if revision is None:
+        raise HTTPException(status_code=404, detail="Notebook revision not found")
+
+    snapshot = revision.snapshot_json or {}
+    notebook.name = _resolve_notebook_name(db, snapshot.get("name") or notebook.name, exclude_id=notebook_id)
+    notebook.engine_id = snapshot.get("engine_id") or notebook.engine_id
+    notebook.description = snapshot.get("description")
+    notebook.cells_json = list(snapshot.get("cells_json") or [])
+    valid_cell_ids = {cell.get("id") for cell in notebook.cells_json if cell.get("id")}
+    notebook.latest_cell_results_json = [
+        item for item in (notebook.latest_cell_results_json or []) if item.get("cell_id") in valid_cell_ids
+    ]
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This revision could not be restored because the notebook name is already taken.") from exc
+    db.refresh(notebook)
+    restored_revision = _create_notebook_revision(db, notebook, "restore")
+    db.refresh(notebook)
+    return NotebookRevisionRestoreResponse(
+        notebook=notebook,
+        revision=restored_revision,
+        message=f"Restored notebook to revision v{revision.version_number}.",
+    )
 
 
 @router.delete("/notebooks/{notebook_id}", response_model=ApiMessage, dependencies=[Depends(require_roles("admin", "analyst"))])
