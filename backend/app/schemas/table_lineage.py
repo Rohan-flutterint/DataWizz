@@ -77,6 +77,28 @@ class TableLineageCounts(BaseModel):
     notebook_artifacts: int
 
 
+class TableLineageImpactAsset(BaseModel):
+    kind: str
+    asset_id: str | None = None
+    label: str
+    secondary_label: str | None = None
+    reason: str
+    severity: str
+    route_ref: str | None = None
+
+
+class TableLineageImpactAnalysis(BaseModel):
+    severity: str
+    score: int
+    total_downstream_assets: int
+    business_exposure: str
+    orchestration_exposure: str
+    notebook_exposure: str
+    safe_change_summary: str
+    recommended_checks: list[str]
+    highest_risk_assets: list[TableLineageImpactAsset]
+
+
 class TableLineageResponse(BaseModel):
     table_id: str
     table_name: str
@@ -89,3 +111,4 @@ class TableLineageResponse(BaseModel):
     dashboards: list[TableLineageDashboard]
     report_schedules: list[TableLineageReportSchedule]
     counts: TableLineageCounts
+    impact_analysis: TableLineageImpactAnalysis
