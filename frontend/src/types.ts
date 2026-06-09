@@ -105,6 +105,17 @@ export type DeltaTable = {
     status: 'strong' | 'partial' | 'missing'
     detail: string
   }[]
+  contract_mode?: 'off' | 'warn' | 'strict'
+  contract_version?: number
+  contract_schema_json?: { name: string; type: string }[]
+  contract_required_columns?: string[]
+  contract_allow_additive_columns?: boolean
+  contract_allow_column_removal?: boolean
+  contract_allow_type_changes?: boolean
+  contract_last_check_status?: 'pass' | 'warning' | 'blocked' | 'untracked'
+  contract_last_check_summary?: string
+  contract_last_check_issues?: string[]
+  contract_last_check_at?: string | null
   created_at: string
   updated_at: string
 }

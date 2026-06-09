@@ -57,6 +57,20 @@ function impactSeverityLabel(severity?: string) {
   return severity ? severity.replace(/_/g, ' ') : 'low'
 }
 
+function contractModeTone(mode?: string) {
+  if (mode === 'strict') return 'bg-rose-50 text-rose-700'
+  if (mode === 'warn') return 'bg-amber-50 text-amber-700'
+  if (mode === 'off') return 'bg-slate-100 text-slate-700'
+  return 'bg-cyan-50 text-lagoon'
+}
+
+function contractCheckTone(status?: string) {
+  if (status === 'pass') return 'bg-emerald-50 text-emerald-700'
+  if (status === 'warning') return 'bg-amber-50 text-amber-700'
+  if (status === 'blocked') return 'bg-rose-50 text-rose-700'
+  return 'bg-slate-100 text-slate-700'
+}
+
 export function CatalogPage() {
   const { hasAnyRole } = useAuth()
   const canEdit = hasAnyRole('admin', 'analyst')
@@ -70,6 +84,11 @@ export function CatalogPage() {
   const [ownerDraft, setOwnerDraft] = useState('')
   const [tagsDraft, setTagsDraft] = useState('')
   const [lineageDraft, setLineageDraft] = useState('')
+  const [contractModeDraft, setContractModeDraft] = useState<'off' | 'warn' | 'strict'>('warn')
+  const [contractRequiredColumnsDraft, setContractRequiredColumnsDraft] = useState('')
+  const [contractAllowAdditiveDraft, setContractAllowAdditiveDraft] = useState(true)
+  const [contractAllowRemovalDraft, setContractAllowRemovalDraft] = useState(false)
+  const [contractAllowTypeDraft, setContractAllowTypeDraft] = useState(false)
   const [lineageFocus, setLineageFocus] = useState<LineageFocus>('upstream')
   const [statusMessage, setStatusMessage] = useState('Select a curated table to inspect governance metadata, ownership, freshness, and lineage hints.')
   const appliedSearchTableIdRef = useRef<string | null>(null)
@@ -100,6 +119,32 @@ export function CatalogPage() {
       queryClient.invalidateQueries({ queryKey: ['tables'] })
       queryClient.invalidateQueries({ queryKey: ['tables', table.id, 'preview'] })
       setStatusMessage(`Refreshed metadata for ${table.schema_name}.${table.name}.`)
+    },
+    onError: (error: Error) => setStatusMessage(error.message),
+  })
+  const updateContractMutation = useMutation({
+    mutationFn: async (payload: {
+      tableId: string
+      contract_mode: 'off' | 'warn' | 'strict'
+      contract_required_columns?: string[]
+      contract_allow_additive_columns: boolean
+      contract_allow_column_removal: boolean
+      contract_allow_type_changes: boolean
+      adopt_current_schema?: boolean
+    }) =>
+      api.updateTableContract(payload.tableId, {
+        contract_mode: payload.contract_mode,
+        contract_required_columns: payload.contract_required_columns,
+        contract_allow_additive_columns: payload.contract_allow_additive_columns,
+        contract_allow_column_removal: payload.contract_allow_column_removal,
+        contract_allow_type_changes: payload.contract_allow_type_changes,
+        adopt_current_schema: payload.adopt_current_schema,
+      }),
+    onSuccess: (table) => {
+      queryClient.invalidateQueries({ queryKey: ['tables'] })
+      queryClient.invalidateQueries({ queryKey: ['tables', table.id, 'preview'] })
+      queryClient.invalidateQueries({ queryKey: ['tables', table.id, 'lineage'] })
+      setStatusMessage(`Updated contract guardrails for ${table.schema_name}.${table.name}.`)
     },
     onError: (error: Error) => setStatusMessage(error.message),
   })
@@ -180,6 +225,11 @@ export function CatalogPage() {
     setOwnerDraft(selectedTable.owner ?? '')
     setTagsDraft((selectedTable.tags ?? []).join(', '))
     setLineageDraft(selectedTable.lineage_hint ?? '')
+    setContractModeDraft(selectedTable.contract_mode ?? 'warn')
+    setContractRequiredColumnsDraft((selectedTable.contract_required_columns ?? []).join(', '))
+    setContractAllowAdditiveDraft(selectedTable.contract_allow_additive_columns ?? true)
+    setContractAllowRemovalDraft(selectedTable.contract_allow_column_removal ?? false)
+    setContractAllowTypeDraft(selectedTable.contract_allow_type_changes ?? false)
     setStatusMessage(`Inspecting ${selectedTable.schema_name}.${selectedTable.name}.`)
   }, [selectedTableId, selectedTable])
 
@@ -624,6 +674,182 @@ export function CatalogPage() {
                     </div>
                   </Panel>
                 ) : null}
+
+                <Panel className="space-y-5">
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Data Contract Guardrails</p>
+                      <h3 className="mt-2 font-display text-2xl text-ink">Schema Compatibility Rules</h3>
+                      <p className="mt-3 max-w-3xl text-sm leading-6 text-slate/70">
+                        Contracts are enforced across every Delta publish path, including SQL Workspace writes, notebook publishes, and pipeline `writeDelta` nodes.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${contractModeTone(selectedTable.contract_mode)}`}>
+                        {selectedTable.contract_mode ?? 'warn'} mode
+                      </span>
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${contractCheckTone(selectedTable.contract_last_check_status)}`}>
+                        {selectedTable.contract_last_check_status ?? 'untracked'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <div className={cn('rounded-2xl p-4', theme === 'dark' ? 'bg-white/[0.03]' : 'bg-slate-50')}>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Contract Version</p>
+                      <p className="mt-2 font-display text-2xl text-ink">{selectedTable.contract_version ?? 1}</p>
+                      <p className="mt-2 text-sm text-slate/70">Baseline version retained for compatibility checks.</p>
+                    </div>
+                    <div className={cn('rounded-2xl p-4', theme === 'dark' ? 'bg-white/[0.03]' : 'bg-slate-50')}>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Baseline Columns</p>
+                      <p className="mt-2 font-display text-2xl text-ink">{selectedTable.contract_schema_json?.length ?? selectedTable.schema_json?.length ?? 0}</p>
+                      <p className="mt-2 text-sm text-slate/70">Columns currently covered by the active contract baseline.</p>
+                    </div>
+                    <div className={cn('rounded-2xl p-4', theme === 'dark' ? 'bg-white/[0.03]' : 'bg-slate-50')}>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Required Columns</p>
+                      <p className="mt-2 font-display text-2xl text-ink">{selectedTable.contract_required_columns?.length ?? 0}</p>
+                      <p className="mt-2 text-sm text-slate/70">Columns that must survive any future publish.</p>
+                    </div>
+                    <div className={cn('rounded-2xl p-4', theme === 'dark' ? 'bg-white/[0.03]' : 'bg-slate-50')}>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Last Validation</p>
+                      <p className="mt-2 text-sm font-semibold text-ink">
+                        {selectedTable.contract_last_check_at ? formatDate(selectedTable.contract_last_check_at) : 'Not checked yet'}
+                      </p>
+                      <p className="mt-2 text-sm text-slate/70">
+                        {selectedTable.contract_last_check_summary ?? 'No contract check summary has been recorded yet.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {selectedTable.contract_last_check_issues?.length ? (
+                    <div className={cn('rounded-2xl border p-4', theme === 'dark' ? 'border-amber-400/25 bg-amber-400/8' : 'border-amber-200 bg-amber-50')}>
+                      <p className={cn('text-xs font-semibold uppercase tracking-[0.24em]', theme === 'dark' ? 'text-amber-100/80' : 'text-amber-700')}>
+                        Last Contract Issues
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {selectedTable.contract_last_check_issues.map((issue) => (
+                          <span
+                            key={issue}
+                            className={cn(
+                              'rounded-full px-3 py-1 text-xs font-medium',
+                              theme === 'dark' ? 'bg-black/20 text-amber-50' : 'bg-white text-amber-800',
+                            )}
+                          >
+                            {issue}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+                    <fieldset className="grid gap-4" disabled={!canEdit || updateContractMutation.isPending}>
+                      <div>
+                        <Label>Contract Mode</Label>
+                        <Select value={contractModeDraft} onChange={(event) => setContractModeDraft(event.target.value as 'off' | 'warn' | 'strict')}>
+                          <option value="off">Off</option>
+                          <option value="warn">Warn</option>
+                          <option value="strict">Strict</option>
+                        </Select>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-3">
+                        <div>
+                          <Label>Allow Additive Columns</Label>
+                          <Select value={String(contractAllowAdditiveDraft)} onChange={(event) => setContractAllowAdditiveDraft(event.target.value === 'true')}>
+                            <option value="true">Allowed</option>
+                            <option value="false">Blocked</option>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label>Allow Column Removal</Label>
+                          <Select value={String(contractAllowRemovalDraft)} onChange={(event) => setContractAllowRemovalDraft(event.target.value === 'true')}>
+                            <option value="false">Blocked</option>
+                            <option value="true">Allowed</option>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label>Allow Type Changes</Label>
+                          <Select value={String(contractAllowTypeDraft)} onChange={(event) => setContractAllowTypeDraft(event.target.value === 'true')}>
+                            <option value="false">Blocked</option>
+                            <option value="true">Allowed</option>
+                          </Select>
+                        </div>
+                      </div>
+                      <div>
+                        <Label>Required Columns</Label>
+                        <Input
+                          value={contractRequiredColumnsDraft}
+                          onChange={(event) => setContractRequiredColumnsDraft(event.target.value)}
+                          placeholder="order_id, customer_id, order_date"
+                        />
+                        <p className="mt-2 text-sm text-slate/70">Comma-separated columns that must remain present whenever this table is republished.</p>
+                      </div>
+                    </fieldset>
+
+                    <div className="space-y-4">
+                      <div className={cn('rounded-2xl p-4', theme === 'dark' ? 'bg-white/[0.03]' : 'bg-slate-50')}>
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/50">Guardrail Behavior</p>
+                        <div className="mt-4 space-y-3">
+                          <div className={cn('rounded-2xl p-3 text-sm', theme === 'dark' ? 'bg-black/20 text-white/80' : 'bg-white text-slate-700')}>
+                            <span className="font-semibold text-ink">Off:</span> publishes proceed without contract validation.
+                          </div>
+                          <div className={cn('rounded-2xl p-3 text-sm', theme === 'dark' ? 'bg-black/20 text-white/80' : 'bg-white text-slate-700')}>
+                            <span className="font-semibold text-ink">Warn:</span> breaking changes are recorded but the publish still lands.
+                          </div>
+                          <div className={cn('rounded-2xl p-3 text-sm', theme === 'dark' ? 'bg-black/20 text-white/80' : 'bg-white text-slate-700')}>
+                            <span className="font-semibold text-ink">Strict:</span> incompatible schema changes block the Delta write before metadata is updated.
+                          </div>
+                        </div>
+                      </div>
+                      {canEdit ? (
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            disabled={updateContractMutation.isPending}
+                            onClick={() =>
+                              updateContractMutation.mutate({
+                                tableId: selectedTable.id,
+                                contract_mode: contractModeDraft,
+                                contract_required_columns: contractRequiredColumnsDraft
+                                  .split(',')
+                                  .map((column) => column.trim())
+                                  .filter(Boolean),
+                                contract_allow_additive_columns: contractAllowAdditiveDraft,
+                                contract_allow_column_removal: contractAllowRemovalDraft,
+                                contract_allow_type_changes: contractAllowTypeDraft,
+                              })
+                            }
+                          >
+                            {updateContractMutation.isPending ? 'Saving...' : 'Save Guardrails'}
+                          </Button>
+                          <Button
+                            tone="ghost"
+                            disabled={updateContractMutation.isPending}
+                            onClick={() =>
+                              updateContractMutation.mutate({
+                                tableId: selectedTable.id,
+                                contract_mode: contractModeDraft,
+                                contract_required_columns: contractRequiredColumnsDraft
+                                  .split(',')
+                                  .map((column) => column.trim())
+                                  .filter(Boolean),
+                                contract_allow_additive_columns: contractAllowAdditiveDraft,
+                                contract_allow_column_removal: contractAllowRemovalDraft,
+                                contract_allow_type_changes: contractAllowTypeDraft,
+                                adopt_current_schema: true,
+                              })
+                            }
+                          >
+                            Adopt Current Schema
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className={cn('rounded-2xl p-4 text-sm', theme === 'dark' ? 'bg-white/[0.03] text-white/70' : 'bg-slate-50 text-slate-700')}>
+                          Your current role can inspect contract state, but only analysts and admins can update table guardrails.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </Panel>
 
                 <div className="grid gap-5 xl:grid-cols-[0.85fr_minmax(0,1.15fr)]">
                   <Panel>
