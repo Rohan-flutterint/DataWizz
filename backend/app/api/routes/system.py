@@ -26,6 +26,8 @@ from app.schemas.system import (
 )
 from app.services.auth_service import auth_service
 from app.services.storage import StorageService
+from app.services.superset_catalog_service import superset_catalog_service
+from app.services.superset_runtime_service import superset_runtime_service
 
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -220,12 +222,14 @@ def global_search(
     return GlobalSearchResponse(query=q, items=items[:limit])
 
 
-@router.get("/integrations/superset", response_model=SupersetHealthResponse)
-def superset_integration_status(_: User = Depends(get_current_user)) -> SupersetHealthResponse:
+def _build_superset_integration_status() -> SupersetHealthResponse:
     checked_url = f"{settings.superset_url.rstrip('/')}/health"
+    ui_check_url = f"{settings.superset_url.rstrip('/')}/login/?next=/superset/welcome/"
     reachable = False
     http_status: int | None = None
     detail: str | None = None
+    ui_http_status: int | None = None
+    ui_healthy = False
 
     try:
         request = Request(checked_url, method="GET")
@@ -241,57 +245,111 @@ def superset_integration_status(_: User = Depends(get_current_user)) -> Superset
     except Exception as exc:  # noqa: BLE001
         detail = f"Unexpected Superset health check failure: {exc}"
 
+    if reachable:
+        try:
+            ui_request = Request(ui_check_url, method="GET")
+            with urlopen(ui_request, timeout=2) as response:
+                ui_http_status = response.status
+                ui_healthy = 200 <= response.status < 400
+        except HTTPError as exc:
+            ui_http_status = exc.code
+            detail = f"Superset health endpoint is up, but the UI returned HTTP {exc.code}."
+        except URLError as exc:
+            detail = f"Superset health endpoint is up, but the UI check failed: {exc.reason}"
+        except Exception as exc:  # noqa: BLE001
+            detail = f"Superset health endpoint is up, but the UI check failed: {exc}"
+
+    overall_reachable = reachable and ui_healthy
+    serving_catalog = superset_catalog_service.get_status()
+    auto_connection = superset_runtime_service.get_connection_status() if overall_reachable else {
+        "name": superset_runtime_service.connection_name,
+        "runtime_mode": superset_runtime_service.read_runtime_state().get("mode", "unknown"),
+        "expected_sqlalchemy_uri": superset_runtime_service.get_connection_target()["sqlalchemy_uri"],
+        "database_path": serving_catalog.get("database_path"),
+        "provisioned": False,
+        "database_id": None,
+        "found_sqlalchemy_uri": None,
+        "backend": None,
+        "expose_in_sqllab": None,
+    }
+
     sample_connections = [
         {
-            "label": "Local PostgreSQL Metadata",
-            "purpose": "Quick demo path for browsing platform metadata and validating Superset connectivity.",
+            "label": "Host DuckDB Serving Catalog",
+            "purpose": "Recommended local connection for Superset running natively on the same machine as DataWizz.",
+            "sqlalchemy_uri": serving_catalog["host_sqlalchemy_uri"],
+        },
+        {
+            "label": "Docker DuckDB Serving Catalog",
+            "purpose": "Use this from inside the Superset container when the managed runtime is using the Docker profile.",
+            "sqlalchemy_uri": serving_catalog["container_sqlalchemy_uri"],
+        },
+        {
+            "label": "PostgreSQL Metadata",
+            "purpose": "Optional metadata-only connection if you want to inspect platform tables rather than curated analytics data.",
             "sqlalchemy_uri": "postgresql://postgres:postgres@localhost:5432/lakehouse",
-        },
-        {
-            "label": "Docker Network PostgreSQL Metadata",
-            "purpose": "Use this from inside the Superset container when creating a connection in the same Compose network.",
-            "sqlalchemy_uri": "postgresql://postgres:postgres@postgres:5432/lakehouse",
-        },
-        {
-            "label": "Future Curated Delta Query Path",
-            "purpose": "Recommended storytelling path for a fuller lakehouse setup once Trino or DuckDB-serving is added.",
-            "sqlalchemy_uri": "trino://trino@localhost:8080/lakehouse/analytics",
         },
     ]
 
     sample_datasets = [
         {
-            "name": "sales_curated",
-            "schema": "analytics",
-            "description": "Primary demo-ready curated sales table for KPI cards, time-series revenue, and regional breakdowns.",
-        },
-        {
-            "name": "customer_orders_curated",
-            "schema": "analytics",
-            "description": "Suggested follow-on curated dataset for customer-level segmentation demos.",
-        },
-    ]
+            "name": asset["object_name"],
+            "schema": asset["object_schema"],
+            "description": asset["description"],
+            "asset_kind": asset["asset_kind"],
+            "display_name": asset["display_name"],
+        }
+        for asset in serving_catalog.get("assets", [])
+        if asset["asset_kind"] in {"curated_table", "semantic_dataset"}
+    ][:8]
 
     return SupersetHealthResponse(
-        status="healthy" if reachable else "unreachable",
-        reachable=reachable,
+        status="healthy" if overall_reachable else ("degraded" if reachable else "unreachable"),
+        reachable=overall_reachable,
         checked_url=checked_url,
-        http_status=http_status,
+        http_status=ui_http_status or http_status,
         detail=detail,
         login={
             "ui_url": settings.superset_url,
             "username": settings.superset_username,
             "password": settings.superset_password,
         },
+        serving_catalog=serving_catalog,
+        auto_connection=auto_connection,
         sample_connections=sample_connections,
         sample_datasets=sample_datasets,
         setup={
             "compose_command": "docker compose --profile superset up --build",
+            "local_command": "./run.sh local superset",
+            "auto_command": "./run.sh auto superset",
+            "native_command": "./run.sh local superset native",
             "profile": "superset",
+            "embedded_ui_path": "/bi/superset",
             "notes": [
-                "Start the main DataWizz stack first so PostgreSQL and curated storage are available.",
-                "Use the local PostgreSQL URI for quick connectivity demos from the host machine.",
-                "For true curated Delta querying, position Trino or a DuckDB-serving layer in front of the curated zone later.",
+                "Use ./run.sh local superset for the managed Superset launch path; it will use Docker when available and native Python fallback when Docker is missing.",
+                "Use ./run.sh local superset native if you want to force the no-Docker path explicitly.",
+                "The embedded page in DataWizz points at the same local Superset runtime shown at the ui_url above.",
+                "DataWizz now auto-registers the DuckDB serving catalog inside Superset during startup when the managed runtime is healthy.",
+                "Use the provision action on this page if you ever want to repair or recreate that connection manually.",
+                "After adding the connection, look in the raw, analytics, and semantic schemas for synced DataWizz sources.",
             ],
         },
     )
+
+
+@router.get("/integrations/superset", response_model=SupersetHealthResponse)
+def superset_integration_status(_: User = Depends(get_current_user)) -> SupersetHealthResponse:
+    return _build_superset_integration_status()
+
+
+@router.post("/integrations/superset/sync", response_model=SupersetHealthResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
+def sync_superset_catalog(db: Session = Depends(get_db)) -> SupersetHealthResponse:
+    superset_catalog_service.safe_sync(db, reason="manual_resync")
+    return _build_superset_integration_status()
+
+
+@router.post("/integrations/superset/provision", response_model=SupersetHealthResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
+def provision_superset_connection(db: Session = Depends(get_db)) -> SupersetHealthResponse:
+    superset_catalog_service.safe_sync(db, reason="pre_provision_sync")
+    superset_runtime_service.provision_serving_catalog_connection()
+    return _build_superset_integration_status()

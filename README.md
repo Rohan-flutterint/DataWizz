@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**An lakehouse, orchestration, and BI workspace for modern analytics teams.**
+**A lakehouse, orchestration, and BI workspace for modern analytics teams.**
 
 [![Workspace](https://img.shields.io/badge/workspace-available-7c3aed?style=flat-square)](http://localhost:5173)
 [![Backend](https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square)](./backend)
@@ -24,6 +24,7 @@ The current version is intentionally built as a serious MVP rather than a toy de
 - Build and validate visual pipelines
 - Track runs, retries, and logs
 - Create semantic datasets, charts, dashboards, and scheduled reports
+- Embed Superset and auto-provision a shared DataWizz analytics connection
 - Switch between dark and light workspace themes
 - Run locally with one script or as a Docker demo stack
 
@@ -167,6 +168,8 @@ This launcher:
 
 - Reuses healthy local frontend and backend processes when they are already running
 - Starts the app in local demo mode when Docker is unavailable
+- Starts the managed Superset runtime automatically by default
+- Can bootstrap Superset natively without Docker when Docker is unavailable
 - Supports a Docker-based stack when Docker is installed
 
 Local endpoints:
@@ -174,7 +177,7 @@ Local endpoints:
 - App: `http://localhost:5173`
 - API: `http://localhost:8000`
 - API docs: `http://localhost:8000/docs`
-- Superset setup page: `http://localhost:5173/bi/superset`
+- Embedded Superset page: `http://localhost:5173/bi/superset`
 
 Demo credentials:
 
@@ -185,9 +188,12 @@ Demo credentials:
 
 ```bash
 ./run.sh local
+./run.sh local nosuperset
+./run.sh local superset native
 ./run.sh local --restart
+./run.sh auto nosuperset
 ./run.sh docker
-./run.sh docker superset
+./run.sh docker nosuperset
 ```
 
 ## Local Development
@@ -234,7 +240,11 @@ Included services:
 Optional Superset:
 
 ```bash
-docker compose --profile superset up --build
+./run.sh
+# force the no-Docker runtime
+./run.sh local superset native
+# skip Superset when you want only the core workspace
+./run.sh local nosuperset
 ```
 
 ## Demo Flow
@@ -308,27 +318,35 @@ This repo has been locally verified with:
 - Delta publishing is implemented through the backend write services
 - Scheduling is now active in-app for saved cron pipelines
 - Notebook outputs persist per cell and restore when a notebook is reopened
-- The BI layer is intentionally lightweight and app-native; Superset remains the richer external optional path
+- The BI layer is intentionally lightweight and app-native; Superset is now available as an embedded managed runtime with an auto-provisioned shared DuckDB connection
 
-## Roadmap
+## Roadmap Status
 
-### Platform
+### Completed
 
-- Authentication and RBAC hardening
+- Real login, sessions, seeded users, and role-aware API and UI RBAC for `admin`, `analyst`, and `viewer`
+- Dark and light workspace themes with a polished shared shell, search, and page-level UX cleanup
+- File Explorer drag-and-drop uploads, schema and row preview, deep column profiling, and profile-driven recommendations
+- SQL Workspace querying, export, and Delta publishing backed by DuckDB
+- Catalog governance editing, quality and freshness signals, data contract guardrails, lineage relationships, and mini lineage graph drill-down
+- Visual pipeline builder validation, join and aggregation guardrails, retries, logs filtering, and recurring scheduler execution
+- Engine Lab notebooks with DuckDB, PySpark, and DataFusion runtimes, saved snippets, collaboration basics, and persisted cell outputs
+- BI dataset explorer, chart builder, saved charts, dashboard builder and viewer, filters, and report scheduler with stored artifacts
+- Embedded Superset runtime with a shared serving catalog and auto-provisioned `DataWizz Serving Catalog` connection
+
+### Next
+
 - Flink streaming support
 - Great Expectations quality checks
 - OpenLineage integration
 - Hive Metastore or Nessie-backed catalog options
 - Notebook export artifacts and richer collaboration flows
-- CI/CD, monitoring, and Kubernetes deployment
-
-### BI and Analytics
-
 - Natural-language chart generation
 - Dashboard sharing and permissions
 - Row-level security and column masking
 - Semantic metrics layer
 - Alerts, subscriptions, and richer export delivery
+- CI/CD, monitoring, and Kubernetes deployment
 
 ---
 

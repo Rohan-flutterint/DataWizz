@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models.catalog import DeltaTable as DeltaTableModel
 from app.services.catalog_metadata_service import CatalogMetadataService
+from app.services.superset_catalog_service import superset_catalog_service
 from app.utils.naming import slugify_identifier
 
 
@@ -76,6 +77,7 @@ class DeltaService:
         db.commit()
         db.refresh(existing)
         self.catalog_metadata_service.ensure_contract(existing)
+        superset_catalog_service.safe_sync(db, reason=f"delta_write:{table_name}")
         return existing
 
     def refresh_metadata(self, db: Session, table_record: DeltaTableModel) -> DeltaTableModel:
@@ -86,4 +88,5 @@ class DeltaService:
         table_record.last_refreshed_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(table_record)
+        superset_catalog_service.safe_sync(db, reason=f"delta_refresh:{table_record.name}")
         return table_record

@@ -492,6 +492,44 @@ export type SupersetIntegrationStatus = {
     username: string
     password: string
   }
+  serving_catalog: {
+    catalog_status: string
+    last_synced_at?: string | null
+    last_sync_reason?: string | null
+    last_error?: string | null
+    database_path: string
+    host_sqlalchemy_uri: string
+    container_sqlalchemy_uri: string
+    asset_counts: {
+      raw_files: number
+      curated_tables: number
+      semantic_datasets: number
+      total: number
+    }
+    schemas: string[]
+    assets: {
+      asset_kind: string
+      object_schema: string
+      object_name: string
+      display_name: string
+      source_type: string
+      source_ref: string
+      description?: string | null
+      row_count?: number | null
+      updated_at?: string | null
+    }[]
+  }
+  auto_connection: {
+    name: string
+    runtime_mode: string
+    expected_sqlalchemy_uri: string
+    database_path?: string | null
+    provisioned: boolean
+    database_id?: number | null
+    found_sqlalchemy_uri?: string | null
+    backend?: string | null
+    expose_in_sqllab?: boolean | null
+  }
   sample_connections: {
     label: string
     purpose: string
@@ -501,10 +539,16 @@ export type SupersetIntegrationStatus = {
     name: string
     schema: string
     description: string
+    asset_kind?: string
+    display_name?: string
   }[]
   setup: {
     compose_command: string
+    local_command?: string
+    auto_command?: string
+    native_command?: string
     profile: string
+    embedded_ui_path?: string
     notes: string[]
   }
 }
