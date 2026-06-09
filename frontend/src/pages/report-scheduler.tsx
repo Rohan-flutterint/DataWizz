@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
 import { StatusBadge } from '../components/status-badge'
 import { api } from '../lib/api'
@@ -15,10 +16,12 @@ function describeNextRun(frequency: string) {
 }
 
 export function ReportSchedulerPage() {
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const dashboardsQuery = useQuery({ queryKey: ['bi', 'dashboards'], queryFn: api.listDashboards })
   const schedulesQuery = useQuery({ queryKey: ['bi', 'report-schedules'], queryFn: api.listReportSchedules })
   const snapshotsQuery = useQuery({ queryKey: ['bi', 'report-snapshots'], queryFn: api.listReportSnapshots })
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
   const [name, setName] = useState('Weekly Sales Dashboard Snapshot')
   const [frequency, setFrequency] = useState('weekly')
   const [dashboardId, setDashboardId] = useState('')
@@ -26,12 +29,41 @@ export function ReportSchedulerPage() {
   const [format, setFormat] = useState('pdf')
   const [deliveryNote, setDeliveryNote] = useState('Export this dashboard snapshot for internal review.')
   const [statusMessage, setStatusMessage] = useState('Create recurring dashboard snapshots, run them on demand, and retain a real artifact history in local storage.')
+  const appliedSearchScheduleIdRef = useRef<string | null>(null)
 
   useEffect(() => {
+    const requestedScheduleId = searchParams.get('scheduleId')
+    if (
+      requestedScheduleId &&
+      appliedSearchScheduleIdRef.current !== requestedScheduleId &&
+      schedulesQuery.data?.items?.some((schedule) => schedule.id === requestedScheduleId)
+    ) {
+      const requestedSchedule = schedulesQuery.data.items.find((schedule) => schedule.id === requestedScheduleId)
+      appliedSearchScheduleIdRef.current = requestedScheduleId
+      setSelectedScheduleId(requestedScheduleId)
+      setName(requestedSchedule?.name ?? name)
+      setFrequency(requestedSchedule?.frequency ?? frequency)
+      setDashboardId(requestedSchedule?.dashboard_id ?? '')
+      setDestination(requestedSchedule?.destination ?? destination)
+      setFormat(String(requestedSchedule?.config_json.format ?? format))
+      setDeliveryNote(String(requestedSchedule?.config_json.deliveryNote ?? deliveryNote))
+      setStatusMessage(`Inspecting scheduled report ${requestedSchedule?.name ?? 'selection'}.`)
+      return
+    }
+
+    const requestedDashboardId = searchParams.get('dashboardId')
+    if (requestedDashboardId && dashboardsQuery.data?.items?.some((dashboard) => dashboard.id === requestedDashboardId)) {
+      setDashboardId(requestedDashboardId)
+      if (!selectedScheduleId) {
+        setStatusMessage('Inspecting report schedules for the selected dashboard.')
+      }
+      return
+    }
+
     if (!dashboardId && dashboardsQuery.data?.items?.[0]) {
       setDashboardId(dashboardsQuery.data.items[0].id)
     }
-  }, [dashboardId, dashboardsQuery.data])
+  }, [dashboardId, dashboardsQuery.data, deliveryNote, destination, format, frequency, name, schedulesQuery.data, searchParams, selectedScheduleId])
 
   const selectedDashboard = useMemo(
     () => dashboardsQuery.data?.items.find((dashboard) => dashboard.id === dashboardId) ?? null,
@@ -216,10 +248,32 @@ export function ReportSchedulerPage() {
               schedulesQuery.data.items.map((schedule) => {
                 const linkedDashboard = dashboardsQuery.data?.items?.find((dashboard) => dashboard.id === schedule.dashboard_id)
                 return (
-                  <div key={schedule.id} className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+                  <div
+                    key={schedule.id}
+                    className={`rounded-2xl border p-4 ${
+                      selectedScheduleId === schedule.id
+                        ? 'border-lagoon bg-cyan-50/70 shadow-sm'
+                        : 'border-slate-100 bg-slate-50/80'
+                    }`}
+                  >
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <p className="font-semibold text-ink">{schedule.name}</p>
+                        <button
+                          type="button"
+                          className="text-left"
+                          onClick={() => {
+                            setSelectedScheduleId(schedule.id)
+                            setName(schedule.name)
+                            setFrequency(schedule.frequency)
+                            setDashboardId(schedule.dashboard_id ?? '')
+                            setDestination(schedule.destination)
+                            setFormat(String(schedule.config_json.format ?? 'pdf'))
+                            setDeliveryNote(String(schedule.config_json.deliveryNote ?? ''))
+                            setStatusMessage(`Inspecting scheduled report ${schedule.name}.`)
+                          }}
+                        >
+                          <p className="font-semibold text-ink">{schedule.name}</p>
+                        </button>
                         <p className="mt-2 text-sm text-slate/70">{linkedDashboard?.name || 'No linked dashboard'} • {schedule.frequency}</p>
                       </div>
                       <div className="flex flex-wrap gap-2">

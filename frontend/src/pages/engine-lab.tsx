@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowRightLeft, ArrowUp, Check, ChevronDown, ChevronUp, Clock3, Copy, Cpu, DatabaseZap, Download, FileCode2, PencilLine, Play, Plus, SkipForward, Sparkles, Trash2, X } from 'lucide-react'
-import { type DragEvent, useEffect, useMemo, useState } from 'react'
+import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { DataTable } from '../components/data-table'
 import { MonacoSqlEditor } from '../components/monaco-sql-editor'
 import { Button, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
@@ -11,7 +11,7 @@ import { api } from '../lib/api'
 import { cn, formatDate } from '../lib/utils'
 import { useTheme } from '../theme/theme-context'
 import type { DeltaTable, ExecutionEngine, NotebookArtifact, NotebookCell, NotebookCellRunResult, NotebookDocument, NotebookEvent, NotebookSnippet, UploadedFile } from '../types'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 function capabilityPill(enabled: boolean, label: string, theme: 'light' | 'dark') {
   return (
@@ -194,11 +194,13 @@ function buildDefaultNotebook(engine: ExecutionEngine | null): NotebookDocument 
 }
 
 export function EngineLabPage() {
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { theme } = useTheme()
   const queryClient = useQueryClient()
   const { activeEngineId, setActiveEngineId } = useExecutionEngine()
   const [selectedNotebookId, setSelectedNotebookId] = useState<string | null>(null)
+  const appliedSearchNotebookIdRef = useRef<string | null>(null)
   const [draftNotebook, setDraftNotebook] = useState<NotebookDocument | null>(null)
   const [cellResults, setCellResults] = useState<Record<string, NotebookCellRunResult>>({})
   const [collapsedOutputs, setCollapsedOutputs] = useState<Record<string, boolean>>({})
@@ -233,6 +235,18 @@ export function EngineLabPage() {
       setActiveEngineId(engineCatalogQuery.data.default_engine)
     }
   }, [activeEngineId, engineCatalogQuery.data, engines, setActiveEngineId])
+
+  useEffect(() => {
+    const requestedNotebookId = searchParams.get('notebookId')
+    if (
+      requestedNotebookId &&
+      appliedSearchNotebookIdRef.current !== requestedNotebookId &&
+      notebooksQuery.data?.items.some((notebook) => notebook.id === requestedNotebookId)
+    ) {
+      appliedSearchNotebookIdRef.current = requestedNotebookId
+      setSelectedNotebookId(requestedNotebookId)
+    }
+  }, [notebooksQuery.data, searchParams, selectedNotebookId, appliedSearchNotebookIdRef])
 
   useEffect(() => {
     if (selectedNotebookId || draftNotebook || !selectedEngine) return
