@@ -197,6 +197,20 @@ with_superset_env() {
   export SUPERSET_NATIVE_DATABASE_URI="sqlite:///$SUPERSET_NATIVE_DB"
 }
 
+superset_venv_matches_workspace() {
+  [[ -f "$SUPERSET_VENV_DIR/bin/activate" ]] || return 1
+  grep -Fq "$SUPERSET_VENV_DIR" "$SUPERSET_VENV_DIR/bin/activate"
+}
+
+superset_packages_ready() {
+  [[ -x "$SUPERSET_VENV_DIR/bin/python" ]] || return 1
+  "$SUPERSET_VENV_DIR/bin/python" -c 'import superset, cachetools, duckdb, duckdb_engine' >/dev/null 2>&1
+}
+
+superset_admin_exists() {
+  "$SUPERSET_VENV_DIR/bin/superset" fab list-users 2>/dev/null | grep -q "^username:${SUPERSET_DEFAULT_USERNAME}\\b"
+}
+
 ensure_native_superset() {
   local superset_python
   local deps_marker="$SUPERSET_VENV_DIR/.deps-installed"
@@ -214,19 +228,28 @@ ensure_native_superset() {
 
   mkdir -p "$SUPERSET_NATIVE_HOME" "$(dirname "$SUPERSET_NATIVE_DB")"
 
+  if [[ -d "$SUPERSET_VENV_DIR" ]] && ! superset_venv_matches_workspace; then
+    log "Rebuilding stale Superset virtual environment because the workspace path changed"
+    rm -rf "$SUPERSET_VENV_DIR"
+  fi
+
   if [[ ! -d "$SUPERSET_VENV_DIR" ]]; then
     log "Creating native Superset virtual environment with $superset_python"
     "$superset_python" -m venv "$SUPERSET_VENV_DIR"
   fi
 
-  if [[ ! -f "$deps_marker" || ! -f "$version_marker" || "$(cat "$version_marker" 2>/dev/null || true)" != "$requested_spec" ]]; then
+  if superset_packages_ready; then
+    [[ -f "$deps_marker" ]] || touch "$deps_marker"
+    [[ -f "$version_marker" ]] || printf '%s' "$requested_spec" >"$version_marker"
+  fi
+
+  if ! superset_packages_ready || [[ "$(cat "$version_marker" 2>/dev/null || true)" != "$requested_spec" ]]; then
     log "Installing native Superset runtime ($requested_spec)"
     (
-      source "$SUPERSET_VENV_DIR/bin/activate"
-      python -m pip install --upgrade pip setuptools wheel
-      python -m pip install "$requested_spec"
+      "$SUPERSET_VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel
+      "$SUPERSET_VENV_DIR/bin/python" -m pip install "$requested_spec"
       if [[ -n "$supplemental_packages" ]]; then
-        python -m pip install $supplemental_packages
+        "$SUPERSET_VENV_DIR/bin/python" -m pip install $supplemental_packages
       fi
       printf '%s' "$requested_spec" >"$version_marker"
       touch "$deps_marker"
@@ -239,8 +262,7 @@ ensure_native_superset() {
   if ! "$SUPERSET_VENV_DIR/bin/python" -c 'import cachetools, duckdb, duckdb_engine' >/dev/null 2>&1; then
     log "Repairing native Superset runtime dependencies"
     (
-      source "$SUPERSET_VENV_DIR/bin/activate"
-      python -m pip install cachetools duckdb duckdb-engine
+      "$SUPERSET_VENV_DIR/bin/python" -m pip install cachetools duckdb duckdb-engine
     ) >>"$install_log" 2>&1 || {
       log "Native Superset dependency repair failed. See $install_log"
       exit 1
@@ -249,19 +271,22 @@ ensure_native_superset() {
 
   log "Preparing native Superset metadata and admin bootstrap"
   (
-    source "$SUPERSET_VENV_DIR/bin/activate"
     with_superset_env
-    superset db upgrade
-    if [[ ! -f "$admin_marker" || ! -f "$SUPERSET_NATIVE_DB" ]]; then
-      superset fab create-admin \
+    "$SUPERSET_VENV_DIR/bin/superset" db upgrade
+    if ! superset_admin_exists; then
+      "$SUPERSET_VENV_DIR/bin/superset" fab create-admin \
         --username "$SUPERSET_DEFAULT_USERNAME" \
         --firstname "$SUPERSET_DEFAULT_FIRSTNAME" \
         --lastname "$SUPERSET_DEFAULT_LASTNAME" \
         --email "$SUPERSET_DEFAULT_EMAIL" \
         --password "$SUPERSET_DEFAULT_PASSWORD"
-      touch "$admin_marker"
+    else
+      "$SUPERSET_VENV_DIR/bin/superset" fab reset-password \
+        --username "$SUPERSET_DEFAULT_USERNAME" \
+        --password "$SUPERSET_DEFAULT_PASSWORD"
     fi
-    superset init
+    touch "$admin_marker"
+    "$SUPERSET_VENV_DIR/bin/superset" init
   ) >"$init_log" 2>&1 || {
     log "Native Superset initialization failed. See $init_log"
     exit 1
@@ -288,14 +313,6 @@ start_superset_sidecar() {
 start_native_superset() {
   local superset_log="$RUNTIME_DIR/superset-native.log"
   write_superset_runtime_state "native"
-  local launcher_cmd='
-    source "'"$SUPERSET_VENV_DIR"'/bin/activate"
-    export SUPERSET_CONFIG_PATH="'"$SUPERSET_CONFIG_FILE"'"
-    export SUPERSET_SECRET_KEY="'"$SUPERSET_SECRET_KEY_VALUE"'"
-    export SUPERSET_HOME="'"$SUPERSET_NATIVE_HOME"'"
-    export SUPERSET_NATIVE_DATABASE_URI="sqlite:///'"$SUPERSET_NATIVE_DB"'"
-    exec superset run -h 0.0.0.0 -p 8088
-  '
 
   if http_ready "$SUPERSET_HEALTH_URL"; then
     log "Superset already reachable at $SUPERSET_URL. Reusing existing runtime."
@@ -307,16 +324,17 @@ start_native_superset() {
     return 0
   fi
 
-  ensure_native_superset
-
-  log "Launching native Superset runtime in the background on $SUPERSET_URL"
-  if command_exists setsid; then
-    setsid zsh -lc "$launcher_cmd" >"$superset_log" 2>&1 < /dev/null &
-  else
-    nohup zsh -lc "$launcher_cmd" >"$superset_log" 2>&1 < /dev/null &
-  fi
+  log "Launching native Superset bootstrap in the background on $SUPERSET_URL"
+  log "Superset may spend a minute installing packages the first time. The main DataWizz app is still available while this finishes."
+  (
+    ensure_native_superset
+    with_superset_env
+    exec "$SUPERSET_VENV_DIR/bin/superset" run -h 0.0.0.0 -p 8088
+  ) >"$superset_log" 2>&1 &
   echo $! >"$SUPERSET_NATIVE_PID_FILE"
   log "Native Superset log: $superset_log"
+  log "Superset install log: $RUNTIME_DIR/superset-install.log"
+  log "Superset init log: $RUNTIME_DIR/superset-init.log"
 }
 
 start_managed_superset() {
