@@ -37,6 +37,10 @@ class SupersetHealthResponse(BaseModel):
     setup: dict
 
 
+class SupersetEmbedLaunchResponse(BaseModel):
+    launch_url: str
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str

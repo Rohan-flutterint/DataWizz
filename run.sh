@@ -101,6 +101,21 @@ http_ready() {
   curl --silent --show-error --max-time 1 --output /dev/null "$url" >/dev/null 2>&1
 }
 
+wait_for_http_ready() {
+  local url="$1"
+  local attempts="${2:-30}"
+  local delay="${3:-1}"
+
+  for _ in $(seq 1 "$attempts"); do
+    if http_ready "$url"; then
+      return 0
+    fi
+    sleep "$delay"
+  done
+
+  return 1
+}
+
 docker_ready() {
   command_exists docker && docker info >/dev/null 2>&1
 }
@@ -532,6 +547,11 @@ start_local() {
   if wants_superset; then
     start_managed_superset
     background_provision_superset_connection
+    if wait_for_http_ready "$SUPERSET_HEALTH_URL" 45 1; then
+      log "Superset is healthy at $SUPERSET_URL"
+    else
+      log "Superset is still bootstrapping in the background. Open /bi/superset in a few moments if it is not ready immediately."
+    fi
   else
     clear_superset_runtime_state
   fi

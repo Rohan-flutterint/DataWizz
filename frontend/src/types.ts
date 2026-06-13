@@ -406,6 +406,9 @@ export type Dashboard = {
   description?: string
   layout_json: Record<string, unknown>
   filters_json?: Record<string, unknown>[]
+  owner_email?: string | null
+  visibility: 'private' | 'workspace' | 'public'
+  shared_roles_json?: string[] | null
   created_at: string
   updated_at: string
 }
@@ -447,6 +450,8 @@ export type DashboardExportConfig = {
     description?: string
     layout_json: Record<string, unknown>
     filters_json?: Record<string, unknown>[]
+    visibility: 'private' | 'workspace' | 'public'
+    shared_roles_json?: string[]
   }
   widgets: DashboardExportWidget[]
   charts: DashboardExportChart[]

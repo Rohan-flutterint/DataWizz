@@ -19,6 +19,17 @@ def ensure_runtime_schema(db_engine: Engine) -> None:
             with db_engine.begin() as connection:
                 connection.execute(text("ALTER TABLE semantic_datasets ADD COLUMN source_config_json JSON"))
 
+    if "dashboards" in table_names:
+        dashboard_columns = {column["name"] for column in inspector.get_columns("dashboards")}
+        with db_engine.begin() as connection:
+            if "owner_email" not in dashboard_columns:
+                connection.execute(text("ALTER TABLE dashboards ADD COLUMN owner_email VARCHAR(255)"))
+            if "visibility" not in dashboard_columns:
+                connection.execute(text("ALTER TABLE dashboards ADD COLUMN visibility VARCHAR(32)"))
+            if "shared_roles_json" not in dashboard_columns:
+                connection.execute(text("ALTER TABLE dashboards ADD COLUMN shared_roles_json JSON"))
+            connection.execute(text("UPDATE dashboards SET visibility = 'workspace' WHERE visibility IS NULL OR TRIM(visibility) = ''"))
+
     if "notebook_snippets" not in table_names:
         with db_engine.begin() as connection:
             connection.execute(
