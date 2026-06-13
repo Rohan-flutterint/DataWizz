@@ -98,6 +98,8 @@ class DashboardCreateRequest(BaseModel):
     description: str | None = None
     layout_json: dict = Field(default_factory=dict)
     filters_json: list[dict] | None = None
+    visibility: str = Field(default="workspace", pattern="^(private|workspace|public)$")
+    shared_roles_json: list[str] = Field(default_factory=list)
     widgets: list[DashboardWidgetPayload] = Field(default_factory=list)
 
 
@@ -106,6 +108,8 @@ class DashboardUpdateRequest(BaseModel):
     description: str | None = None
     layout_json: dict = Field(default_factory=dict)
     filters_json: list[dict] | None = None
+    visibility: str = Field(default="workspace", pattern="^(private|workspace|public)$")
+    shared_roles_json: list[str] = Field(default_factory=list)
     widgets: list[DashboardWidgetPayload] = Field(default_factory=list)
 
 
@@ -114,6 +118,9 @@ class DashboardRead(TimestampedModel):
     description: str | None = None
     layout_json: dict
     filters_json: list[dict] | None = None
+    owner_email: str | None = None
+    visibility: str
+    shared_roles_json: list[str] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -156,6 +163,8 @@ class DashboardExportDashboardPayload(BaseModel):
     description: str | None = None
     layout_json: dict = Field(default_factory=dict)
     filters_json: list[dict] | None = None
+    visibility: str = Field(default="workspace", pattern="^(private|workspace|public)$")
+    shared_roles_json: list[str] = Field(default_factory=list)
 
 
 class DashboardExportPayload(BaseModel):

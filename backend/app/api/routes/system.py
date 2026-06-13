@@ -1,7 +1,8 @@
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request as FastAPIRequest
+from fastapi.responses import RedirectResponse
 from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session
 
@@ -22,9 +23,11 @@ from app.schemas.system import (
     LoginRequest,
     RecentActivityItem,
     SettingsSnapshotResponse,
+    SupersetEmbedLaunchResponse,
     SupersetHealthResponse,
 )
 from app.services.auth_service import auth_service
+from app.services.bi_service import BiService
 from app.services.storage import StorageService
 from app.services.superset_catalog_service import superset_catalog_service
 from app.services.superset_runtime_service import superset_runtime_service
@@ -33,6 +36,7 @@ from app.services.superset_runtime_service import superset_runtime_service
 router = APIRouter(prefix="/system", tags=["system"])
 settings = get_settings()
 storage_service = StorageService()
+bi_service = BiService()
 
 
 @router.get("/dashboard-metrics", response_model=DashboardMetricsResponse)
@@ -104,7 +108,7 @@ def global_search(
     db: Session = Depends(get_db),
     q: str = Query(min_length=1),
     limit: int = Query(default=12, ge=1, le=30),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> GlobalSearchResponse:
     needle = q.strip()
     if not needle:
@@ -176,13 +180,14 @@ def global_search(
         ]
     )
 
-    dashboards = (
-        db.query(Dashboard)
+    dashboards = [
+        dashboard
+        for dashboard in db.query(Dashboard)
         .filter(or_(Dashboard.name.ilike(like), Dashboard.description.ilike(like)))
         .order_by(desc(Dashboard.updated_at))
-        .limit(limit)
         .all()
-    )
+        if bi_service.can_user_view_dashboard(current_user, dashboard)
+    ][:limit]
     items.extend(
         [
             GlobalSearchResult(
@@ -259,7 +264,7 @@ def _build_superset_integration_status() -> SupersetHealthResponse:
         except Exception as exc:  # noqa: BLE001
             detail = f"Superset health endpoint is up, but the UI check failed: {exc}"
 
-    overall_reachable = reachable and ui_healthy
+    overall_reachable = reachable
     serving_catalog = superset_catalog_service.get_status()
     auto_connection = superset_runtime_service.get_connection_status() if overall_reachable else {
         "name": superset_runtime_service.connection_name,
@@ -304,7 +309,7 @@ def _build_superset_integration_status() -> SupersetHealthResponse:
     ][:8]
 
     return SupersetHealthResponse(
-        status="healthy" if overall_reachable else ("degraded" if reachable else "unreachable"),
+        status="healthy" if overall_reachable and ui_healthy else ("degraded" if overall_reachable else "unreachable"),
         reachable=overall_reachable,
         checked_url=checked_url,
         http_status=ui_http_status or http_status,
@@ -313,6 +318,7 @@ def _build_superset_integration_status() -> SupersetHealthResponse:
             "ui_url": settings.superset_url,
             "username": settings.superset_username,
             "password": settings.superset_password,
+            "embed_launch_path": "/api/system/integrations/superset/embed-login",
         },
         serving_catalog=serving_catalog,
         auto_connection=auto_connection,
@@ -340,6 +346,42 @@ def _build_superset_integration_status() -> SupersetHealthResponse:
 @router.get("/integrations/superset", response_model=SupersetHealthResponse)
 def superset_integration_status(_: User = Depends(get_current_user)) -> SupersetHealthResponse:
     return _build_superset_integration_status()
+
+
+@router.post("/integrations/superset/embed-launch", response_model=SupersetEmbedLaunchResponse)
+def create_superset_embed_launch(
+    request: FastAPIRequest,
+    next: str | None = Query(default="/superset/welcome/"),
+    current_user: User = Depends(get_current_user),
+) -> SupersetEmbedLaunchResponse:
+    ticket = superset_runtime_service.create_embed_ticket(user_id=current_user.id, next_path=next)
+    return SupersetEmbedLaunchResponse(
+        launch_url=str(request.url_for("superset_embed_login")) + f"?ticket={ticket}"
+    )
+
+
+@router.get("/integrations/superset/embed-login")
+def superset_embed_login(ticket: str = Query(min_length=12)) -> RedirectResponse:
+    ticket_record = superset_runtime_service.consume_embed_ticket(ticket)
+    if ticket_record is None:
+        raise HTTPException(status_code=401, detail="Superset launch ticket is invalid or expired")
+
+    try:
+        target_url, cookies = superset_runtime_service.login_browser_session(next_path=ticket_record.get("next_path"))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Could not establish the Superset browser session: {exc}") from exc
+
+    response = RedirectResponse(url=target_url, status_code=302)
+    for cookie in cookies:
+        response.set_cookie(
+            key=cookie["name"],
+            value=cookie["value"],
+            path=cookie.get("path") or "/",
+            secure=bool(cookie.get("secure")),
+            httponly=bool(cookie.get("httponly")),
+            samesite="lax",
+        )
+    return response
 
 
 @router.post("/integrations/superset/sync", response_model=SupersetHealthResponse, dependencies=[Depends(require_roles("admin", "analyst"))])

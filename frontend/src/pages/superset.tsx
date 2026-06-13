@@ -36,6 +36,14 @@ export function SupersetSetupPage() {
     queryFn: api.getSupersetIntegrationStatus,
     refetchInterval: 10000,
   })
+  const embedLaunchQuery = useQuery({
+    queryKey: ['system', 'superset', 'embed-launch', iframeKey],
+    queryFn: () => api.getSupersetEmbedLaunchUrl('/superset/welcome/'),
+    enabled: Boolean(integrationQuery.data?.reachable),
+    refetchOnWindowFocus: false,
+    staleTime: 0,
+    retry: 1,
+  })
   const syncMutation = useMutation({
     mutationFn: api.syncSupersetServingCatalog,
     onSuccess: (payload) => {
@@ -48,8 +56,15 @@ export function SupersetSetupPage() {
       queryClient.setQueryData(['system', 'superset'], payload)
     },
   })
+  const externalLaunchMutation = useMutation({
+    mutationFn: () => api.getSupersetEmbedLaunchUrl('/superset/welcome/'),
+    onSuccess: ({ launch_url }) => {
+      window.open(launch_url, '_blank', 'noopener,noreferrer')
+    },
+  })
 
   const integration = integrationQuery.data
+  const embedLaunchUrl = embedLaunchQuery.data?.launch_url
   const servingCatalog = integration?.serving_catalog
   const autoConnection = integration?.auto_connection
   const curatedAndSemanticAssets = (servingCatalog?.assets ?? []).filter((asset) => asset.asset_kind !== 'raw_file')
@@ -59,7 +74,7 @@ export function SupersetSetupPage() {
       ? 'Superset connection is provisioned and ready.'
       : 'Provision command completed. Refresh status to confirm the new connection.'
     : null
-  const actionError = syncMutation.error ?? provisionMutation.error
+  const actionError = syncMutation.error ?? provisionMutation.error ?? embedLaunchQuery.error ?? externalLaunchMutation.error
   const healthDetail = integrationQuery.isLoading
     ? 'Checking Superset health...'
     : integration?.detail ?? 'Superset health endpoint responded successfully.'
@@ -87,9 +102,9 @@ export function SupersetSetupPage() {
               </Button>
             ) : null}
             {integration?.login?.ui_url ? (
-              <a href={integration.login.ui_url} target="_blank" rel="noreferrer">
-                <Button>Open External Superset</Button>
-              </a>
+              <Button tone="ghost" onClick={() => externalLaunchMutation.mutate()} disabled={externalLaunchMutation.isPending}>
+                {externalLaunchMutation.isPending ? 'Opening Superset...' : 'Open External Superset'}
+              </Button>
             ) : null}
           </div>
         }
@@ -122,12 +137,24 @@ export function SupersetSetupPage() {
           </div>
         </div>
         {integration?.reachable && integration?.login?.ui_url ? (
-          <iframe
-            key={iframeKey}
-            title="Embedded Superset"
-            src={integration.login.ui_url}
-            className="h-[860px] w-full bg-white"
-          />
+          embedLaunchUrl ? (
+            <iframe
+              key={embedLaunchUrl}
+              title="Embedded Superset"
+              src={embedLaunchUrl}
+              className="h-[860px] w-full bg-white"
+            />
+          ) : (
+            <div className="grid place-items-center px-5 py-16">
+              <div className="max-w-lg rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Preparing Session</p>
+                <h3 className="mt-2 font-display text-2xl text-ink">Signing you into Superset automatically</h3>
+                <p className="mt-3 text-sm leading-6 text-slate/75">
+                  DataWizz is creating a fresh embedded Superset browser session before loading the BI surface.
+                </p>
+              </div>
+            </div>
+          )
         ) : (
           <div className="grid gap-4 px-5 py-6 lg:grid-cols-[1.1fr_0.9fr]">
             <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5">

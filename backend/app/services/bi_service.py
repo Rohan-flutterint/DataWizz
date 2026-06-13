@@ -9,6 +9,7 @@ import pyarrow.csv as pacsv
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.models.auth import User
 from app.models.bi import Chart, Dashboard, DashboardWidget, ReportSchedule, ReportSnapshot, SemanticDataset
 from app.models.catalog import DeltaTable, UploadedFile
 from app.services.duckdb_service import DuckDBService
@@ -18,6 +19,53 @@ class BiService:
     def __init__(self) -> None:
         self.duckdb_service = DuckDBService()
         self.settings = get_settings()
+        self.default_workspace_roles = ["admin", "analyst", "viewer"]
+
+    def normalize_dashboard_access(self, visibility: str | None, shared_roles: list[str] | None) -> tuple[str, list[str]]:
+        normalized_visibility = str(visibility or "workspace").strip().lower()
+        if normalized_visibility not in {"private", "workspace", "public"}:
+            normalized_visibility = "workspace"
+
+        role_values = [str(role).strip().lower() for role in (shared_roles or []) if str(role).strip()]
+        deduped_roles = list(dict.fromkeys(role_values))
+        allowed_roles = [role for role in deduped_roles if role in {"admin", "analyst", "viewer"}]
+
+        if normalized_visibility == "workspace" and not allowed_roles:
+            allowed_roles = list(self.default_workspace_roles)
+        if normalized_visibility != "workspace":
+            allowed_roles = []
+
+        return normalized_visibility, allowed_roles
+
+    def can_user_view_dashboard(self, current_user: User, dashboard: Dashboard) -> bool:
+        role = (current_user.role or "").strip().lower()
+        if role == "admin":
+            return True
+
+        visibility, shared_roles = self.normalize_dashboard_access(
+            getattr(dashboard, "visibility", None),
+            getattr(dashboard, "shared_roles_json", None),
+        )
+        owner_email = (getattr(dashboard, "owner_email", None) or "").strip().lower()
+        user_email = (current_user.email or "").strip().lower()
+
+        if owner_email and owner_email == user_email:
+            return True
+        if visibility == "public":
+            return True
+        if visibility == "private":
+            return False
+        return role in shared_roles
+
+    def list_visible_dashboards(self, db: Session, current_user: User) -> list[Dashboard]:
+        dashboards = db.query(Dashboard).order_by(Dashboard.updated_at.desc()).all()
+        return [dashboard for dashboard in dashboards if self.can_user_view_dashboard(current_user, dashboard)]
+
+    def get_visible_dashboard(self, db: Session, dashboard_id: str, current_user: User) -> Dashboard:
+        dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).one_or_none()
+        if dashboard is None or not self.can_user_view_dashboard(current_user, dashboard):
+            raise ValueError("Dashboard not found")
+        return dashboard
 
     def list_candidate_datasets(self, db: Session) -> list[dict]:
         datasets = []
@@ -206,6 +254,8 @@ class BiService:
                 "description": dashboard.description,
                 "layout_json": dashboard.layout_json or {},
                 "filters_json": dashboard.filters_json or [],
+                "visibility": self.normalize_dashboard_access(dashboard.visibility, dashboard.shared_roles_json)[0],
+                "shared_roles_json": self.normalize_dashboard_access(dashboard.visibility, dashboard.shared_roles_json)[1],
             },
             "widgets": [
                 {
@@ -259,6 +309,15 @@ class BiService:
             description=dashboard_payload.get("description"),
             layout_json=dashboard_payload.get("layout_json", {}),
             filters_json=dashboard_payload.get("filters_json"),
+            owner_email=payload.get("owner_email"),
+            visibility=self.normalize_dashboard_access(
+                dashboard_payload.get("visibility"),
+                dashboard_payload.get("shared_roles_json"),
+            )[0],
+            shared_roles_json=self.normalize_dashboard_access(
+                dashboard_payload.get("visibility"),
+                dashboard_payload.get("shared_roles_json"),
+            )[1],
         )
         db.add(dashboard)
         db.commit()

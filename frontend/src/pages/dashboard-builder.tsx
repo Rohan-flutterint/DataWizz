@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import GridLayout, { type Layout } from 'react-grid-layout'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
+import { useAuth } from '../auth/auth-context'
 import { ChartRenderer } from '../components/chart-renderer'
 import { Button, EmptyState, Input, Label, PageHeader, Panel, Select, Textarea } from '../components/ui'
 import { api } from '../lib/api'
@@ -60,6 +61,7 @@ function downloadBlob(blob: Blob, fileName: string) {
 export function DashboardBuilderPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { session } = useAuth()
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const chartsQuery = useQuery({ queryKey: ['bi', 'charts'], queryFn: api.listCharts })
   const dashboardsQuery = useQuery({ queryKey: ['bi', 'dashboards'], queryFn: api.listDashboards })
@@ -71,6 +73,8 @@ export function DashboardBuilderPage() {
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null)
   const [filters, setFilters] = useState<DashboardFilterState[]>([])
   const [selectedFilterId, setSelectedFilterId] = useState<string | null>(null)
+  const [visibility, setVisibility] = useState<'private' | 'workspace' | 'public'>('workspace')
+  const [sharedRoles, setSharedRoles] = useState<string[]>(['admin', 'analyst', 'viewer'])
   const [statusMessage, setStatusMessage] = useState('Add saved charts or note widgets to the canvas, then define dashboard-level filters before saving.')
 
   const chartById = useMemo(() => new Map((chartsQuery.data?.items ?? []).map((chart) => [chart.id, chart])), [chartsQuery.data])
@@ -138,6 +142,8 @@ export function DashboardBuilderPage() {
     setFilters([])
     setSelectedWidgetId(null)
     setSelectedFilterId(null)
+    setVisibility('workspace')
+    setSharedRoles(['admin', 'analyst', 'viewer'])
     setStatusMessage('Add saved charts or note widgets to the canvas, then define dashboard-level filters before saving.')
   }
 
@@ -145,6 +151,8 @@ export function DashboardBuilderPage() {
     if (!editingDashboardId || !dashboardDetailQuery.data) return
     setName(dashboardDetailQuery.data.dashboard.name)
     setDescription(dashboardDetailQuery.data.dashboard.description ?? '')
+    setVisibility(dashboardDetailQuery.data.dashboard.visibility ?? 'workspace')
+    setSharedRoles(dashboardDetailQuery.data.dashboard.shared_roles_json?.length ? dashboardDetailQuery.data.dashboard.shared_roles_json : ['admin', 'analyst', 'viewer'])
     setWidgets(
       dashboardDetailQuery.data.widgets.map((widget) => ({
         i: widget.layout_json.i ?? widget.id,
@@ -229,6 +237,8 @@ export function DashboardBuilderPage() {
         defaultStart: filter.defaultStart || null,
         defaultEnd: filter.defaultEnd || null,
       })),
+      visibility,
+      shared_roles_json: visibility === 'workspace' ? sharedRoles : [],
     },
     widgets: widgets.map((widget) => ({
       widget_type: widget.widgetType,
@@ -364,6 +374,8 @@ export function DashboardBuilderPage() {
         defaultStart: filter.defaultStart || null,
         defaultEnd: filter.defaultEnd || null,
       })),
+      visibility,
+      shared_roles_json: visibility === 'workspace' ? sharedRoles : [],
       widgets: widgets.map((widget) => ({
         chart_id: widget.widgetType === 'chart' ? widget.chartId : undefined,
         widget_type: widget.widgetType,
@@ -382,6 +394,16 @@ export function DashboardBuilderPage() {
   const updateSelectedFilter = (patch: Partial<DashboardFilterState>) => {
     if (!selectedFilter) return
     setFilters((current) => current.map((filter) => (filter.id === selectedFilter.id ? { ...filter, ...patch } : filter)))
+  }
+
+  const toggleSharedRole = (role: string) => {
+    setSharedRoles((current) => {
+      if (current.includes(role)) {
+        const next = current.filter((item) => item !== role)
+        return next.length ? next : ['admin', 'analyst', 'viewer']
+      }
+      return [...current, role]
+    })
   }
 
   return (
@@ -454,6 +476,44 @@ export function DashboardBuilderPage() {
           <div>
             <Label>Description</Label>
             <Textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={4} />
+          </div>
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <Label>Sharing & Access</Label>
+            <Select className="mt-3" value={visibility} onChange={(event) => setVisibility(event.target.value as 'private' | 'workspace' | 'public')}>
+              <option value="private">Private to owner + admins</option>
+              <option value="workspace">Workspace role access</option>
+              <option value="public">All signed-in users</option>
+            </Select>
+            <p className="mt-3 text-sm leading-6 text-slate/70">
+              Owner: <span className="font-semibold text-ink">{dashboardDetailQuery.data?.dashboard.owner_email || session?.user.email || 'Current signed-in user'}</span>
+            </p>
+            {visibility === 'workspace' ? (
+              <div className="mt-4 space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate/55">Allowed roles</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { role: 'viewer', label: 'Viewer' },
+                    { role: 'analyst', label: 'Analyst' },
+                    { role: 'admin', label: 'Admin' },
+                  ].map((entry) => {
+                    const active = sharedRoles.includes(entry.role)
+                    return (
+                      <button
+                        key={entry.role}
+                        type="button"
+                        onClick={() => toggleSharedRole(entry.role)}
+                        className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] transition ${
+                          active ? 'bg-cyan-100 text-lagoon ring-1 ring-lagoon/20' : 'bg-white text-slate-500 ring-1 ring-slate-200 hover:text-slate-900'
+                        }`}
+                      >
+                        {entry.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-xs leading-5 text-slate/60">Pick which signed-in roles can discover and open this dashboard from the viewer, report scheduler, and global search.</p>
+              </div>
+            ) : null}
           </div>
           <div>
             <Label>Saved Charts</Label>
@@ -535,7 +595,12 @@ export function DashboardBuilderPage() {
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Canvas Preview</p>
               <h2 className="font-display text-2xl text-ink">Dashboard Layout</h2>
             </div>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate/70">{widgets.length} widgets</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate/70">{widgets.length} widgets</span>
+              <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-lagoon">
+                {visibility === 'public' ? 'public' : visibility === 'private' ? 'private' : 'workspace'}
+              </span>
+            </div>
           </div>
           {filters.length ? (
             <div className="flex flex-wrap gap-2 border-b border-slate-100 bg-slate-50 px-5 py-4">

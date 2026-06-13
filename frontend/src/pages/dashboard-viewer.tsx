@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import GridLayout from 'react-grid-layout'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
+import { useAuth } from '../auth/auth-context'
 import { ChartRenderer } from '../components/chart-renderer'
 import { Button, EmptyState, Input, PageHeader, Panel, Select } from '../components/ui'
 import { api } from '../lib/api'
@@ -82,6 +83,7 @@ function downloadBlob(blob: Blob, fileName: string) {
 }
 
 export function DashboardViewerPage() {
+  const { session } = useAuth()
   const [searchParams] = useSearchParams()
   const dashboardsQuery = useQuery({ queryKey: ['bi', 'dashboards'], queryFn: api.listDashboards })
   const chartsQuery = useQuery({ queryKey: ['bi', 'charts'], queryFn: api.listCharts })
@@ -238,6 +240,28 @@ export function DashboardViewerPage() {
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Selected Dashboard</p>
                 <h2 className="mt-2 font-display text-3xl text-ink">{detailQuery.data.dashboard.name}</h2>
                 <p className="mt-3 max-w-3xl text-sm leading-6 text-slate/70">{detailQuery.data.dashboard.description || 'No dashboard description provided yet.'}</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-lagoon">
+                    {detailQuery.data.dashboard.visibility === 'public'
+                      ? 'Public'
+                      : detailQuery.data.dashboard.visibility === 'private'
+                        ? 'Private'
+                        : 'Workspace'}
+                  </span>
+                  {detailQuery.data.dashboard.owner_email ? (
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                      Owner: {detailQuery.data.dashboard.owner_email}
+                    </span>
+                  ) : null}
+                  {detailQuery.data.dashboard.visibility === 'workspace' && detailQuery.data.dashboard.shared_roles_json?.length ? (
+                    <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200">
+                      Roles: {detailQuery.data.dashboard.shared_roles_json.join(', ')}
+                    </span>
+                  ) : null}
+                  {session?.user.email && detailQuery.data.dashboard.owner_email === session.user.email ? (
+                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">Owned by you</span>
+                  ) : null}
+                </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="rounded-2xl bg-slate-50 p-4">

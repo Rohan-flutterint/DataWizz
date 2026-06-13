@@ -1,10 +1,14 @@
 import json
 import os
+import re
+import secrets
 import subprocess
+import time
+from http.cookiejar import CookieJar
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
-from urllib.request import Request, urlopen
+from urllib.parse import quote, urlencode, urljoin, urlparse
+from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
 
 from app.core.config import ROOT_DIR, get_settings
 from app.services.superset_catalog_service import superset_catalog_service
@@ -20,6 +24,17 @@ class SupersetRuntimeService:
         self.superset_native_home = ROOT_DIR / "storage" / "temp" / "superset" / "home"
         self.superset_native_db = ROOT_DIR / "storage" / "temp" / "superset" / "superset.db"
         self.connection_name = "DataWizz Serving Catalog"
+        self._embed_tickets: dict[str, dict[str, str | float]] = {}
+
+    def _native_superset_command(self) -> list[str] | None:
+        if self.native_superset_bin.exists():
+            return [str(self.native_superset_bin)]
+
+        native_python = self.native_venv_dir / "bin" / "python"
+        if native_python.exists():
+            return [str(native_python), "-m", "superset"]
+
+        return None
 
     def read_runtime_state(self) -> dict:
         if not self.runtime_state_path.exists():
@@ -28,6 +43,103 @@ class SupersetRuntimeService:
             return json.loads(self.runtime_state_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return {"mode": "unknown"}
+
+    def create_embed_ticket(self, *, user_id: str, next_path: str | None = None) -> str:
+        ticket = secrets.token_urlsafe(32)
+        self._prune_embed_tickets()
+        self._embed_tickets[ticket] = {
+            "user_id": user_id,
+            "next_path": self.resolve_next_target(next_path),
+            "expires_at": time.time() + 900,
+        }
+        return ticket
+
+    def consume_embed_ticket(self, ticket: str) -> dict | None:
+        self._prune_embed_tickets()
+        record = self._embed_tickets.pop(ticket, None)
+        if record is None:
+            return None
+        if float(record.get("expires_at", 0)) <= time.time():
+            return None
+        return record
+
+    def resolve_next_target(self, next_path: str | None) -> str:
+        default_target = f"{self.settings.superset_url.rstrip('/')}/superset/welcome/"
+        if not next_path:
+            return default_target
+
+        candidate = next_path.strip()
+        if not candidate:
+            return default_target
+
+        if candidate.startswith("/"):
+            return f"{self.settings.superset_url.rstrip('/')}{candidate}"
+
+        parsed_candidate = urlparse(candidate)
+        parsed_base = urlparse(self.settings.superset_url.rstrip("/"))
+        if parsed_candidate.scheme in {"http", "https"} and parsed_candidate.netloc == parsed_base.netloc:
+            return candidate
+
+        return default_target
+
+    def login_browser_session(self, *, next_path: str | None = None) -> tuple[str, list[dict]]:
+        resolved_target = self.resolve_next_target(next_path)
+        login_page_url = f"{self.settings.superset_url.rstrip('/')}/login/?next={quote(urlparse(resolved_target).path or '/superset/welcome/', safe='/%?=&')}"
+        cookie_jar = CookieJar()
+        opener = build_opener(HTTPCookieProcessor(cookie_jar))
+
+        with opener.open(Request(login_page_url, method="GET"), timeout=10) as response:
+            login_page_html = response.read().decode("utf-8")
+
+        csrf_match = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', login_page_html)
+        action_match = re.search(r"<form[^>]*action=\"([^\"]+)\"", login_page_html)
+        if csrf_match is None:
+            raise RuntimeError("Could not extract Superset CSRF token from the login page.")
+
+        action_url = urljoin(self.settings.superset_url.rstrip("/") + "/", action_match.group(1) if action_match else "/login/")
+        form_payload = urlencode(
+            {
+                "username": self.settings.superset_username,
+                "password": self.settings.superset_password,
+                "csrf_token": csrf_match.group(1),
+                "next": urlparse(resolved_target).path or "/superset/welcome/",
+            }
+        ).encode("utf-8")
+
+        form_request = Request(
+            action_url,
+            data=form_payload,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": login_page_url,
+            },
+            method="POST",
+        )
+        with opener.open(form_request, timeout=10):
+            pass
+
+        parsed_host = urlparse(self.settings.superset_url.rstrip("/")).hostname or "localhost"
+        allowed_domains = {"", parsed_host, f".{parsed_host}", f"{parsed_host}.local", f".{parsed_host}.local"}
+        cookies = [
+            {
+                "name": cookie.name,
+                "value": cookie.value,
+                "path": cookie.path or "/",
+                "secure": cookie.secure,
+                "httponly": "httponly" in {key.lower() for key in cookie._rest.keys()},
+            }
+            for cookie in cookie_jar
+            if cookie.domain in allowed_domains
+        ]
+        if not cookies:
+            raise RuntimeError("Superset login completed but no session cookies were returned.")
+        return resolved_target, cookies
+
+    def _prune_embed_tickets(self) -> None:
+        now = time.time()
+        expired = [ticket for ticket, payload in self._embed_tickets.items() if float(payload.get("expires_at", 0)) <= now]
+        for ticket in expired:
+            self._embed_tickets.pop(ticket, None)
 
     def _request_json(self, path: str, *, method: str = "GET", token: str | None = None, payload: dict | None = None) -> dict:
         headers = {"Content-Type": "application/json"}
@@ -123,13 +235,19 @@ class SupersetRuntimeService:
                 check=False,
             )
         else:
+            command_prefix = self._native_superset_command()
+            if not command_prefix:
+                status = self.get_connection_status()
+                status["command_succeeded"] = False
+                status["stdout"] = ""
+                status["stderr"] = "Native Superset runtime is not installed yet. Start DataWizz again and wait for Superset bootstrap to finish."
+                return status
             env = os.environ.copy()
             env["SUPERSET_CONFIG_PATH"] = str(self.superset_config_path)
             env["SUPERSET_SECRET_KEY"] = "internal-lakehouse-demo"
             env["SUPERSET_HOME"] = str(self.superset_native_home)
             env["SUPERSET_NATIVE_DATABASE_URI"] = f"sqlite:///{self.superset_native_db}"
-            command = [
-                str(self.native_superset_bin),
+            command = command_prefix + [
                 "set-database-uri",
                 "-d",
                 self.connection_name,

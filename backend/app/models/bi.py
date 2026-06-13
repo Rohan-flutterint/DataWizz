@@ -37,6 +37,9 @@ class Dashboard(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     layout_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     filters_json: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    owner_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    visibility: Mapped[str] = mapped_column(String(32), nullable=False, default="workspace")
+    shared_roles_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
 
 class DashboardWidget(UUIDPrimaryKeyMixin, TimestampMixin, Base):

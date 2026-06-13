@@ -6,8 +6,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import require_roles
+from app.api.dependencies import get_current_user, require_roles
 from app.db.session import get_db
+from app.models.auth import User
 from app.models.bi import Chart, Dashboard, ReportSchedule, SemanticDataset
 from app.schemas.common import ApiMessage
 from app.schemas.bi import (
@@ -167,18 +168,26 @@ def preview_chart(payload: dict, db: Session = Depends(get_db)) -> ChartPreviewR
 
 
 @router.get("/dashboards", response_model=DashboardListResponse)
-def list_dashboards(db: Session = Depends(get_db)) -> DashboardListResponse:
-    items = db.query(Dashboard).order_by(Dashboard.updated_at.desc()).all()
+def list_dashboards(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)) -> DashboardListResponse:
+    items = bi_service.list_visible_dashboards(db, current_user)
     return DashboardListResponse(items=items)
 
 
 @router.post("/dashboards", response_model=DashboardDetailResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
-def create_dashboard(payload: DashboardCreateRequest, db: Session = Depends(get_db)) -> DashboardDetailResponse:
+def create_dashboard(
+    payload: DashboardCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DashboardDetailResponse:
+    visibility, shared_roles = bi_service.normalize_dashboard_access(payload.visibility, payload.shared_roles_json)
     dashboard = Dashboard(
         name=bi_service.resolve_dashboard_name(db, payload.name),
         description=payload.description,
         layout_json=payload.layout_json,
         filters_json=payload.filters_json,
+        owner_email=current_user.email,
+        visibility=visibility,
+        shared_roles_json=shared_roles,
     )
     db.add(dashboard)
     try:
@@ -196,10 +205,13 @@ def update_dashboard(dashboard_id: str, payload: DashboardUpdateRequest, db: Ses
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).one_or_none()
     if dashboard is None:
         raise HTTPException(status_code=404, detail="Dashboard not found")
+    visibility, shared_roles = bi_service.normalize_dashboard_access(payload.visibility, payload.shared_roles_json)
     dashboard.name = bi_service.resolve_dashboard_name(db, payload.name, exclude_id=dashboard_id)
     dashboard.description = payload.description
     dashboard.layout_json = payload.layout_json
     dashboard.filters_json = payload.filters_json
+    dashboard.visibility = visibility
+    dashboard.shared_roles_json = shared_roles
     try:
         db.commit()
     except IntegrityError as exc:
@@ -211,10 +223,15 @@ def update_dashboard(dashboard_id: str, payload: DashboardUpdateRequest, db: Ses
 
 
 @router.get("/dashboards/{dashboard_id}/export")
-def export_dashboard(dashboard_id: str, db: Session = Depends(get_db)) -> StreamingResponse:
-    dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).one_or_none()
-    if dashboard is None:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
+def export_dashboard(
+    dashboard_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    try:
+        dashboard = bi_service.get_visible_dashboard(db, dashboard_id, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     payload = DashboardExportPayload(**bi_service.build_dashboard_export(db, dashboard))
     output = BytesIO(payload.model_dump_json(indent=2).encode("utf-8"))
     safe_name = dashboard.name.strip().lower().replace(" ", "_") or "dashboard"
@@ -226,19 +243,35 @@ def export_dashboard(dashboard_id: str, db: Session = Depends(get_db)) -> Stream
 
 
 @router.post("/dashboards/import", response_model=DashboardImportResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
-def import_dashboard(payload: DashboardImportRequest, db: Session = Depends(get_db)) -> DashboardImportResponse:
+def import_dashboard(
+    payload: DashboardImportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DashboardImportResponse:
     try:
-        dashboard, widgets, imported_charts = bi_service.import_dashboard_export(db, payload.model_dump())
+        dashboard, widgets, imported_charts = bi_service.import_dashboard_export(
+            db,
+            {
+                **payload.model_dump(),
+                "owner_email": current_user.email,
+            },
+        )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid dashboard config: {exc}") from exc
     return DashboardImportResponse(dashboard=dashboard, widgets=widgets, imported_charts=imported_charts)
 
 
 @router.post("/dashboards/{dashboard_id}/snapshots", response_model=DashboardSnapshotResponse, dependencies=[Depends(require_roles("admin", "analyst"))])
-def create_dashboard_snapshot(dashboard_id: str, payload: DashboardSnapshotRequest, db: Session = Depends(get_db)) -> DashboardSnapshotResponse:
-    dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).one_or_none()
-    if dashboard is None:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
+def create_dashboard_snapshot(
+    dashboard_id: str,
+    payload: DashboardSnapshotRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DashboardSnapshotResponse:
+    try:
+        dashboard = bi_service.get_visible_dashboard(db, dashboard_id, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     export_payload = bi_service.build_dashboard_export(db, dashboard)
     artifact = bi_service.create_dashboard_snapshot_artifact(dashboard.name, payload.format, export_payload)
     return DashboardSnapshotResponse(
@@ -251,10 +284,15 @@ def create_dashboard_snapshot(dashboard_id: str, payload: DashboardSnapshotReque
 
 
 @router.get("/dashboards/{dashboard_id}", response_model=DashboardDetailResponse)
-def get_dashboard(dashboard_id: str, db: Session = Depends(get_db)) -> DashboardDetailResponse:
-    dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).one_or_none()
-    if dashboard is None:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
+def get_dashboard(
+    dashboard_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DashboardDetailResponse:
+    try:
+        dashboard = bi_service.get_visible_dashboard(db, dashboard_id, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     widgets = bi_service.list_dashboard_widgets(db, dashboard_id)
     return DashboardDetailResponse(dashboard=dashboard, widgets=widgets)
 
