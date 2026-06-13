@@ -1,22 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { Button, PageHeader, Panel } from '../components/ui'
 import { StatusBadge } from '../components/status-badge'
 import { api } from '../lib/api'
 
 function CopyField({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false)
+
+  async function handleCopy() {
+    await navigator.clipboard.writeText(value)
+    setCopied(true)
+    window.setTimeout(() => {
+      setCopied(false)
+    }, 1600)
+  }
+
   return (
     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate/50">{label}</p>
       <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <code className="overflow-x-auto rounded-xl bg-slate-950 px-3 py-2 text-xs text-slate-100">{value}</code>
-        <Button
-          tone="ghost"
-          className="shrink-0"
-          onClick={() => {
-            void navigator.clipboard.writeText(value)
-          }}
-        >
-          Copy
+        <Button tone="ghost" className="shrink-0" onClick={() => void handleCopy()}>
+          {copied ? 'Copied' : 'Copy'}
         </Button>
       </div>
     </div>
@@ -25,6 +30,7 @@ function CopyField({ label, value }: { label: string; value: string }) {
 
 export function SupersetSetupPage() {
   const queryClient = useQueryClient()
+  const [iframeKey, setIframeKey] = useState(0)
   const integrationQuery = useQuery({
     queryKey: ['system', 'superset'],
     queryFn: api.getSupersetIntegrationStatus,
@@ -47,6 +53,19 @@ export function SupersetSetupPage() {
   const servingCatalog = integration?.serving_catalog
   const autoConnection = integration?.auto_connection
   const curatedAndSemanticAssets = (servingCatalog?.assets ?? []).filter((asset) => asset.asset_kind !== 'raw_file')
+  const syncFeedback = syncMutation.isSuccess ? 'Serving catalog resynced successfully.' : null
+  const provisionFeedback = provisionMutation.isSuccess
+    ? autoConnection?.provisioned
+      ? 'Superset connection is provisioned and ready.'
+      : 'Provision command completed. Refresh status to confirm the new connection.'
+    : null
+  const actionError = syncMutation.error ?? provisionMutation.error
+  const healthDetail = integrationQuery.isLoading
+    ? 'Checking Superset health...'
+    : integration?.detail ?? 'Superset health endpoint responded successfully.'
+  const lastSyncedAt = servingCatalog?.last_synced_at
+    ? new Date(servingCatalog.last_synced_at).toLocaleString()
+    : null
 
   return (
     <div className="space-y-6">
@@ -62,6 +81,11 @@ export function SupersetSetupPage() {
             <Button tone="ghost" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
               {syncMutation.isPending ? 'Resyncing Catalog...' : 'Resync Serving Catalog'}
             </Button>
+            {integration?.reachable ? (
+              <Button tone="ghost" onClick={() => setIframeKey((current) => current + 1)}>
+                Refresh Embedded View
+              </Button>
+            ) : null}
             {integration?.login?.ui_url ? (
               <a href={integration.login.ui_url} target="_blank" rel="noreferrer">
                 <Button>Open External Superset</Button>
@@ -70,6 +94,18 @@ export function SupersetSetupPage() {
           </div>
         }
       />
+
+      {actionError ? (
+        <Panel className="border-rose-200 bg-rose-50 text-rose-700">
+          {(actionError as Error).message || 'Superset action failed. Check the local runtime logs and try again.'}
+        </Panel>
+      ) : null}
+
+      {syncFeedback || provisionFeedback ? (
+        <Panel className="border-emerald-200 bg-emerald-50 text-emerald-700">
+          {provisionFeedback ?? syncFeedback}
+        </Panel>
+      ) : null}
 
       <Panel className="overflow-hidden p-0">
         <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-5 lg:flex-row lg:items-start lg:justify-between">
@@ -87,6 +123,7 @@ export function SupersetSetupPage() {
         </div>
         {integration?.reachable && integration?.login?.ui_url ? (
           <iframe
+            key={iframeKey}
             title="Embedded Superset"
             src={integration.login.ui_url}
             className="h-[860px] w-full bg-white"
@@ -122,7 +159,7 @@ export function SupersetSetupPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Health Status</p>
           <div className="mt-3 flex items-center gap-3">
             <StatusBadge status={integration?.status ?? 'checking'} />
-            <span className="text-sm text-slate/70">{integrationQuery.isLoading ? 'Checking Superset health...' : integration?.detail}</span>
+            <span className="text-sm text-slate/70">{healthDetail}</span>
           </div>
         </Panel>
         <Panel>
@@ -148,6 +185,9 @@ export function SupersetSetupPage() {
                 : 'DataWizz has not registered the serving-catalog connection in Superset yet.'}
             </span>
           </div>
+          {autoConnection?.provisioned && lastSyncedAt ? (
+            <p className="mt-3 text-xs uppercase tracking-[0.2em] text-slate/50">Last synced {lastSyncedAt}</p>
+          ) : null}
         </Panel>
         <Panel>
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate/55">Runtime Mode</p>
